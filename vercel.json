@@ -1,13 +1,5 @@
 {
-  "framework": "vite",
-  "buildCommand": "vite build",
-  "outputDirectory": "dist",
-  "installCommand": "npm install",
   "rewrites": [
     { "source": "/(.*)", "destination": "/index.html" }
-  ],
-  "ignoreCommand": "git diff --quiet HEAD^ HEAD -- . ':(exclude)supabase/'",
-  "env": {
-    "NODE_ENV": "production"
-  }
+  ]
 }
