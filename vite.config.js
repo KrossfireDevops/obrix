@@ -62,14 +62,10 @@ export default defineConfig({
       },
  
       workbox: {
-        // ✅ CRÍTICO: aumentar límite para bundles >2MB
         maximumFileSizeToCacheInBytes: 5 * 1024 * 1024,
-        
         globPatterns: ['**/*.{js,css,html,ico,png,svg,woff2}'],
         navigateFallback: '/index.html',
-        
-        // ✅ CORREGIDO: usar glob strings en lugar de regex (compatibilidad con workbox v7+)
-        exclude: ['**/*.map', '**/workbox-*.js', '**/pdf.worker.*'],
+        globIgnores: ['**/*.map', '**/workbox-*.js', '**/pdf.worker.*'],
  
         runtimeCaching: [
           {
@@ -109,7 +105,6 @@ export default defineConfig({
         ],
       },
  
-      // ✅ CORREGIDO: desactivar en producción para evitar conflictos en el build
       devOptions: {
         enabled: false,
         type: 'module',
@@ -117,7 +112,7 @@ export default defineConfig({
     }),
   ],
  
-  // ✅ Optimización de chunks para reducir bundle inicial
+  // ✅ Optimización de chunks
   build: {
     rollupOptions: {
       output: {
@@ -126,8 +121,8 @@ export default defineConfig({
           'vendor-react': ['react', 'react-dom', 'react-router-dom'],
           // PDF pesado: separar en chunk propio
           'pdf-lib': ['pdfjs-dist'],
-          // Utilidades pesadas
-          'vendor-utils': ['html2canvas', 'jszip', 'purify-css'],
+          // ✅ CORREGIDO: eliminar 'purify-css' (paquete no válido)
+          'vendor-utils': ['html2canvas', 'jszip'],
           // GoldenRing: separar lógica de sincronización
           'goldenring-core': [
             '@/services/goldenring.db',
@@ -137,7 +132,6 @@ export default defineConfig({
         },
       },
     },
-    // ✅ Aumentar límite de advertencia de chunk (opcional, para logs más limpios)
     chunkSizeWarningLimit: 1000,
   },
  
