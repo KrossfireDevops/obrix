@@ -68,8 +68,8 @@ export default defineConfig({
         globPatterns: ['**/*.{js,css,html,ico,png,svg,woff2}'],
         navigateFallback: '/index.html',
         
-        // ✅ Excluir assets muy pesados del precache (se cargarán bajo demanda)
-        exclude: [/pdf\.worker/, /\.map$/, /workbox-.*/],
+        // ✅ CORREGIDO: usar glob strings en lugar de regex (compatibilidad con workbox v7+)
+        exclude: ['**/*.map', '**/workbox-*.js', '**/pdf.worker.*'],
  
         runtimeCaching: [
           {
@@ -109,8 +109,9 @@ export default defineConfig({
         ],
       },
  
+      // ✅ CORREGIDO: desactivar en producción para evitar conflictos en el build
       devOptions: {
-        enabled: true,
+        enabled: false,
         type: 'module',
       },
     }),
