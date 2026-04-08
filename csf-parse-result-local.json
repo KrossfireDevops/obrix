@@ -1,0 +1,13 @@
+{
+  "success": true,
+  "resultado": {
+    "tipo_documento": "CSF",
+    "es_documento_correcto": false,
+    "confianza": 0,
+    "datos_extraidos": {},
+    "debug": {
+      "texto_len": 180149,
+      "texto_preview": "%PDF-1.4 | 5 0 obj | << | /Type /XObject | /Subtype /Image | /Filter /FlateDecode | /Length 9203 | /Width 862 | /Height 99 | /BitsPerComponent 8 | /ColorSpace /DeviceRGB | >> | stream | x í S }W k?%yJ Tí l KVe' ulK e 0 a p í iZB }S :sú\\ B ! B ! B ! B ! B ! B ! B ! B D # B ! B ! B ! B ! B ! B ! B ! B ! B ! B ! B ! B ! B ! B ! B ! B ! B ! ú ? g { | í B ! 8z p _ 2 \" ~WB ! y W C GYQ ! B<Y8 _ 4 p \"R#_ 3 \" 5o o }á g c . D ( _! B Ñoheñ| awp3 7_ | B K B N i! q d bb H #! B Ñ?z ! vLW qv {n 7 uy -~ X1 _ B "
+    }
+  }
+}

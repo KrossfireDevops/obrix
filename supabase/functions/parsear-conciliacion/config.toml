@@ -1,0 +1,5 @@
+# supabase/functions/parsear-conciliacion/config.toml
+# Configuración de la Edge Function para Supabase CLI
+
+[functions.parsear-conciliacion]
+verify_jwt = true           # Solo usuarios autenticados pueden invocarla
