@@ -434,7 +434,12 @@ export const Sidebar = ({ isOpen = false, onClose = () => {} }) => {
       >
         {/* Logo */}
         <div style={{ height: '64px', display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '0 16px', borderBottom: '1px solid #e5e7eb', flexShrink: 0 }}>
-          <img src="/obrix_V2.png" alt="Obrix" style={{ height: '80px', width: 'auto', maxWidth: '160px', objectFit: 'contain' }} />
+          <img
+            src="/Obrix_V3_web.png"
+            srcSet="/Obrix_V3_web.png 1x, /Obrix_V3.png 2x"
+            alt="Obrix"
+            style={{ height: '52px', width: 'auto', maxWidth: '180px', objectFit: 'contain', display: 'block' }}
+          />
           <button onClick={onClose} className="sidebar-close-btn" style={{ padding: '6px', borderRadius: '8px', border: 'none', backgroundColor: 'transparent', cursor: 'pointer', color: '#6b7280', display: 'none' }}>
             <X size={20} />
           </button>
