@@ -1,8 +1,13 @@
 // ============================================================
 //  OBRIX ERP — Componente: SyncPanel
 //  Archivo: src/components/contabilidad/SyncPanel.jsx
-//  Versión: 1.0 | Marzo 2026
-//  Modal para iniciar descarga manual de CFDIs del SAT.
+//  Versión: 1.1 | Abril 2026
+//  Cambios v1.1:
+//    - CORRECCIÓN CRÍTICA: todas las referencias a
+//      config?.efirma_cer_url reemplazadas por
+//      config?.efirma_configurada (booleano real de company_efirma).
+//    - Se muestra titular y vigencia de la e.firma cuando está lista.
+//    - Mensaje de advertencia mejorado con ruta correcta a Settings.
 // ============================================================
 
 import { useState, useEffect } from 'react';
@@ -10,6 +15,7 @@ import { supabase } from '../../config/supabase';
 import {
   X, Download, CheckCircle, AlertTriangle, Clock,
   RefreshCw, Package, FileText, ChevronRight, Loader,
+  ShieldCheck, CalendarDays,
 } from 'lucide-react';
 import {
   solicitarDescarga, verificarSolicitud, descargarPaquete,
@@ -24,20 +30,20 @@ const TIPO_COMP_OPCIONES = [
 ];
 
 const TIPO_DESCARGA_OPCIONES = [
-  { value: 'ambas',    label: 'Emitidas y Recibidas' },
-  { value: 'emitidas', label: 'Solo Emitidas' },
-  { value: 'recibidas',label: 'Solo Recibidas' },
+  { value: 'ambas',     label: 'Emitidas y Recibidas' },
+  { value: 'emitidas',  label: 'Solo Emitidas' },
+  { value: 'recibidas', label: 'Solo Recibidas' },
 ];
 
 // Estado de solicitud → ícono + color
 function EstadoSolicitud({ estado }) {
   const cfg = {
-    pendiente:   { icon: Clock,        color: 'text-gray-400',  label: 'Pendiente'   },
-    en_proceso:  { icon: Loader,       color: 'text-blue-500 animate-spin', label: 'Procesando' },
-    lista:       { icon: CheckCircle,  color: 'text-green-500', label: 'Lista'       },
-    error:       { icon: AlertTriangle,color: 'text-red-500',   label: 'Error'       },
-    vencida:     { icon: AlertTriangle,color: 'text-amber-500', label: 'Vencida'     },
-    rechazada:   { icon: AlertTriangle,color: 'text-red-500',   label: 'Rechazada'   },
+    pendiente:  { icon: Clock,         color: 'text-gray-400',                label: 'Pendiente'  },
+    en_proceso: { icon: Loader,        color: 'text-blue-500 animate-spin',   label: 'Procesando' },
+    lista:      { icon: CheckCircle,   color: 'text-green-500',               label: 'Lista'      },
+    error:      { icon: AlertTriangle, color: 'text-red-500',                 label: 'Error'      },
+    vencida:    { icon: AlertTriangle, color: 'text-amber-500',               label: 'Vencida'    },
+    rechazada:  { icon: AlertTriangle, color: 'text-red-500',                 label: 'Rechazada'  },
   };
   const { icon: Icon, color, label } = cfg[estado] ?? cfg.pendiente;
   return (
@@ -58,22 +64,22 @@ export default function SyncPanel({ config, onClose, onSuccess }) {
   const hace30 = new Date(Date.now() - 30 * 86400000).toISOString().split('T')[0];
 
   const [form, setForm] = useState({
-    fechaInicio:    hace30,
-    fechaFin:       hoy,
-    tipoDescarga:   'ambas',
+    fechaInicio:     hace30,
+    fechaFin:        hoy,
+    tipoDescarga:    'ambas',
     tipoComprobante: '',
   });
 
   // ── Estado del proceso ────────────────────────────────────
-  const [paso,         setPaso]         = useState('form');  // 'form' | 'procesando' | 'resultado'
-  const [solicitudId,  setSolicitudId]  = useState(null);
-  const [resultado,    setResultado]    = useState(null);
-  const [error,        setError]        = useState(null);
-  const [polling,      setPolling]      = useState(false);
+  const [paso,        setPaso]        = useState('form'); // 'form' | 'procesando' | 'resultado'
+  const [solicitudId, setSolicitudId] = useState(null);
+  const [resultado,   setResultado]   = useState(null);
+  const [error,       setError]       = useState(null);
+  const [polling,     setPolling]     = useState(false);
 
   // ── Historial de descargas recientes ─────────────────────
-  const [historial,    setHistorial]    = useState([]);
-  const [loadHist,     setLoadHist]     = useState(true);
+  const [historial, setHistorial] = useState([]);
+  const [loadHist,  setLoadHist]  = useState(true);
 
   useEffect(() => {
     getSolicitudesDescarga(5)
@@ -81,6 +87,11 @@ export default function SyncPanel({ config, onClose, onSuccess }) {
       .catch(() => {})
       .finally(() => setLoadHist(false));
   }, []);
+
+  // ── FIX v1.1: detectar e.firma con el campo correcto ─────
+  // config.efirma_configurada es un booleano que viene de
+  // company_efirma.configurada — nunca usar efirma_cer_url.
+  const efirmaLista = config?.efirma_configurada === true;
 
   // ── Iniciar descarga ──────────────────────────────────────
   const handleIniciar = async () => {
@@ -95,7 +106,6 @@ export default function SyncPanel({ config, onClose, onSuccess }) {
       });
       setSolicitudId(res.solicitud_id);
       setResultado({ fase: 'solicitado', idSat: res.id_solicitud_sat });
-      // Iniciar polling automático
       iniciarPolling(res.solicitud_id);
     } catch (e) {
       setError(e.message);
@@ -107,7 +117,7 @@ export default function SyncPanel({ config, onClose, onSuccess }) {
   const iniciarPolling = (solId) => {
     setPolling(true);
     let intentos = 0;
-    const MAX    = 30;  // 30 intentos × 10s = 5 min máximo en UI
+    const MAX    = 30; // 30 × 10s = 5 min máximo en UI
 
     const tick = async () => {
       if (intentos++ >= MAX) {
@@ -121,7 +131,6 @@ export default function SyncPanel({ config, onClose, onSuccess }) {
 
         if (verif.estado === 'lista') {
           setPolling(false);
-          // Descargar paquetes automáticamente
           await descargarTodosPaquetes(verif.ids_paquetes ?? [], solId);
         } else if (verif.estado === 'error') {
           setPolling(false);
@@ -140,7 +149,6 @@ export default function SyncPanel({ config, onClose, onSuccess }) {
 
   // ── Descargar todos los paquetes ──────────────────────────
   const descargarTodosPaquetes = async (idsPaquetes, solId) => {
-    // Obtener IDs de paquetes de BD (por solicitud)
     const { data: paquetes } = await supabase
       .from('sat_paquetes_descarga')
       .select('id, id_paquete_sat, numero_paquete')
@@ -153,7 +161,7 @@ export default function SyncPanel({ config, onClose, onSuccess }) {
       try {
         setResultado(prev => ({
           ...prev,
-          fase:         'descargando',
+          fase:          'descargando',
           paqueteActual: paq.numero_paquete,
           totalPaquetes: paquetes.length,
         }));
@@ -204,13 +212,39 @@ export default function SyncPanel({ config, onClose, onSuccess }) {
                 El proceso puede tardar entre 1 y 5 minutos dependiendo del volumen.
               </p>
 
-              {/* Advertencia si no hay e.firma */}
-              {(!config?.efirma_cer_url) && (
+              {/* ── Estado de la e.firma ─────────────────────────
+                  FIX v1.1: usamos efirmaLista (efirma_configurada)
+                  en lugar de config?.efirma_cer_url             */}
+              {efirmaLista ? (
+                <div className="flex items-start gap-2 p-3 bg-green-50 border border-green-200 rounded-lg">
+                  <ShieldCheck size={15} className="text-green-600 mt-0.5 shrink-0" />
+                  <div className="text-sm text-green-800">
+                    <p className="font-semibold">e.firma configurada</p>
+                    {config?.efirma_titular && (
+                      <p className="text-xs text-green-700 mt-0.5">
+                        Titular: {config.efirma_titular}
+                      </p>
+                    )}
+                    {config?.efirma_vigencia && (
+                      <p className="text-xs text-green-600 mt-0.5 flex items-center gap-1">
+                        <CalendarDays size={11} />
+                        Vigente hasta: {formatFecha(config.efirma_vigencia)}
+                      </p>
+                    )}
+                  </div>
+                </div>
+              ) : (
                 <div className="flex items-start gap-2 p-3 bg-amber-50 border border-amber-200 rounded-lg">
                   <AlertTriangle size={15} className="text-amber-600 mt-0.5 shrink-0" />
-                  <p className="text-sm text-amber-800">
-                    La e.firma no está configurada. Ve a <strong>Configuración → Empresa</strong> y sube el archivo .cer y .key.
-                  </p>
+                  <div>
+                    <p className="text-sm font-semibold text-amber-800">e.firma no configurada</p>
+                    <p className="text-xs text-amber-700 mt-0.5">
+                      Para descargar CFDIs del SAT necesitas cargar la e.firma
+                      del representante legal (archivo .cer + .key) en{' '}
+                      <strong>Configuración → Empresa → e.firma</strong>.
+                      La e.firma es diferente al CSD — la emite el SAT al representante legal.
+                    </p>
+                  </div>
                 </div>
               )}
 
@@ -267,20 +301,7 @@ export default function SyncPanel({ config, onClose, onSuccess }) {
                 </select>
               </div>
 
-              {!config?.efirma_cer_url && (
-                <div className="flex items-start gap-2 p-3 bg-amber-50 border border-amber-200 rounded-lg">
-                  <AlertTriangle size={14} className="text-amber-500 mt-0.5 shrink-0" />
-                  <div>
-                    <p className="text-sm font-semibold text-amber-800">e.firma no configurada</p>
-                    <p className="text-xs text-amber-700 mt-0.5">
-                      Para descargar CFDIs del SAT necesitas cargar la e.firma de la empresa
-                      (archivo .cer + .key) en <strong>Ajustes → Empresa → e.firma</strong>.
-                      La e.firma es diferente al CSD — la emite el SAT para el representante legal.
-                    </p>
-                  </div>
-                </div>
-              )}
-
+              {/* Error */}
               {error && (
                 <div className="flex items-start gap-2 p-3 bg-red-50 border border-red-200 rounded-lg">
                   <AlertTriangle size={14} className="text-red-500 mt-0.5 shrink-0" />
@@ -315,17 +336,23 @@ export default function SyncPanel({ config, onClose, onSuccess }) {
             <div className="py-4 space-y-5">
               <ProgresoStep
                 activo={resultado.fase === 'solicitado' || resultado.fase === 'en_proceso'}
-                completado={['lista','descargando','descargando_paquetes','completado'].includes(resultado.fase)}
+                completado={['lista','descargando','completado'].includes(resultado.fase)}
                 numero={1}
                 titulo="Solicitud enviada al SAT"
-                subtitulo={resultado.idSat ? `ID: ${resultado.idSat.substring(0,20)}…` : 'Enviando…'}
+                subtitulo={resultado.idSat ? `ID: ${resultado.idSat.substring(0, 20)}…` : 'Enviando…'}
               />
               <ProgresoStep
                 activo={resultado.fase === 'en_proceso'}
                 completado={['lista','descargando','completado'].includes(resultado.fase)}
                 numero={2}
                 titulo="SAT procesando solicitud"
-                subtitulo={resultado.fase === 'en_proceso' ? 'Verificando cada 10 segundos…' : resultado.num_cfdis ? `${resultado.num_cfdis} CFDIs encontrados` : ''}
+                subtitulo={
+                  resultado.fase === 'en_proceso'
+                    ? 'Verificando cada 10 segundos…'
+                    : resultado.num_cfdis
+                    ? `${resultado.num_cfdis} CFDIs encontrados`
+                    : ''
+                }
               />
               <ProgresoStep
                 activo={resultado.fase === 'descargando'}
@@ -389,7 +416,9 @@ export default function SyncPanel({ config, onClose, onSuccess }) {
                   <AlertTriangle size={24} className="text-red-500 shrink-0" />
                   <div>
                     <p className="font-semibold text-red-800">Error en la sincronización</p>
-                    <p className="text-sm text-red-700 mt-0.5">{error ?? 'Revisa el estado en la tabla de solicitudes.'}</p>
+                    <p className="text-sm text-red-700 mt-0.5">
+                      {error ?? 'Revisa el estado en la tabla de solicitudes.'}
+                    </p>
                   </div>
                 </div>
               )}
@@ -407,7 +436,9 @@ export default function SyncPanel({ config, onClose, onSuccess }) {
               >
                 Cancelar
               </button>
-              {!config?.efirma_cer_url ? (
+
+              {/* FIX v1.1: condición correcta con efirmaLista */}
+              {!efirmaLista ? (
                 <a
                   href="/settings/company"
                   className="flex items-center gap-2 px-5 py-2 bg-amber-500 text-white text-sm font-medium rounded-lg hover:bg-amber-600 transition-colors"
@@ -466,8 +497,8 @@ function ProgresoStep({ numero, titulo, subtitulo, activo, completado }) {
       <div className={`
         w-7 h-7 rounded-full flex items-center justify-center text-xs font-bold shrink-0 mt-0.5
         ${completado ? 'bg-green-500 text-white'
-          : activo    ? 'bg-indigo-600 text-white ring-4 ring-indigo-100'
-          :             'bg-gray-100 text-gray-400'}
+          : activo   ? 'bg-indigo-600 text-white ring-4 ring-indigo-100'
+          :            'bg-gray-100 text-gray-400'}
       `}>
         {completado ? <CheckCircle size={14} /> : numero}
       </div>

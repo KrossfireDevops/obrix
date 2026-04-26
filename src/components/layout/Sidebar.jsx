@@ -1,9 +1,14 @@
 // src/components/layout/Sidebar.jsx
-// v3.2 — Secciones colapsables + Favoritos + Tesorería completa
+// v3.3 — Abril 2026
+// Cambios vs v3.2:
+//   - Logo dinámico: lee logo_url desde empresaConfig (AuthContext)
+//     Si la empresa tiene logo configurado lo muestra,
+//     si no, fallback al logo de OBRIX (Obrix_V3_web.png)
 
 import { useState, useEffect, useRef } from 'react'
 import { NavLink, useLocation } from 'react-router-dom'
 import { usePermission } from '../../hooks/usePermission'
+import { useAuth } from '../../context/AuthContext'
 import {
   LayoutDashboard, Package, FileText, Settings, X,
   FolderOpen, GitBranch, BarChart2, TrendingUp, TrendingDown,
@@ -13,7 +18,6 @@ import {
   CalendarDays, GanttChartSquare, Receipt, BadgeDollarSign,
   PiggyBank, BarChart3, SlidersHorizontal, DollarSign,
   Wallet, GripVertical, Home,
-  // Tesorería
   Landmark, GitMerge, FilePlus2, Stamp,
 } from 'lucide-react'
 import { ClipboardCheck, Shield, Zap, FileKey2, ShieldCheck } from 'lucide-react'
@@ -28,7 +32,6 @@ const MENU_STRUCTURE = [
     icon: LayoutDashboard, module: 'dashboard', standalone: true,
   },
 
-  // ── OPERACIÓN DE OBRA ─────────────────────────────────────
   { type: 'section', name: 'OPERACIÓN DE OBRA', icon: FolderOpen },
   { type: 'item', name: 'Proyectos',        path: '/projects',         icon: FolderOpen,       module: 'projects'     },
   { type: 'item', name: 'Árbol de Proyecto',path: '/project-tree',     icon: GitBranch,        module: 'project_tree' },
@@ -37,7 +40,6 @@ const MENU_STRUCTURE = [
   { type: 'item', name: 'Programa de Obra', path: '/obra/programa',    icon: GanttChartSquare, module: 'projects'     },
   { type: 'item', name: 'Asistencia',       path: '/attendance',       icon: ClipboardCheck,   module: 'attendance'   },
 
-  // ── PERSONAL ──────────────────────────────────────────────
   { type: 'section', name: 'PERSONAL', icon: HardHat },
   {
     type: 'group', name: 'Gestión de Personal', icon: HardHat, module: 'personal',
@@ -47,7 +49,6 @@ const MENU_STRUCTURE = [
     ],
   },
 
-  // ── MATERIALES ────────────────────────────────────────────
   { type: 'section', name: 'MATERIALES', icon: Package },
   { type: 'item', name: 'Inventario', path: '/inventory', icon: Package, module: 'inventory' },
   {
@@ -58,27 +59,24 @@ const MENU_STRUCTURE = [
     ],
   },
 
-  // ── COMPRAS ───────────────────────────────────────────────
   { type: 'section', name: 'COMPRAS', icon: ShoppingCart },
   { type: 'item', name: 'Proveedores', path: '/compras/proveedores', icon: Store, module: 'compras' },
   {
     type: 'group', name: 'Órdenes de Compra', icon: ShoppingCart, module: 'compras',
     children: [
-      { name: 'Todas las OC',      path: '/compras/ordenes',                       icon: ClipboardList, module: 'compras' },
-      { name: 'Nueva OC Directa',  path: '/compras/ordenes/nueva?origen=directa',  icon: FileText,      module: 'compras' },
-      { name: 'Desde Solicitud',   path: '/compras/ordenes/nueva?origen=solicitud', icon: Truck,        module: 'compras' },
+      { name: 'Todas las OC',      path: '/compras/ordenes',                        icon: ClipboardList, module: 'compras' },
+      { name: 'Nueva OC Directa',  path: '/compras/ordenes/nueva?origen=directa',   icon: FileText,      module: 'compras' },
+      { name: 'Desde Solicitud',   path: '/compras/ordenes/nueva?origen=solicitud', icon: Truck,         module: 'compras' },
     ],
   },
 
-  // ── GASTOS ────────────────────────────────────────────────
   { type: 'section', name: 'GASTOS', icon: Receipt },
-  { type: 'item', name: 'Mis Gastos',   path: '/gastos/mis-gastos',      icon: Receipt,         module: 'gastos' },
-  { type: 'item', name: 'Aprobaciones', path: '/gastos/aprobaciones',    icon: BadgeDollarSign,  module: 'gastos' },
-  { type: 'item', name: 'Reembolsos',   path: '/gastos/reembolsos',      icon: PiggyBank,        module: 'gastos' },
-  { type: 'item', name: 'Caja Chica',   path: '/gastos/reposicion-caja', icon: Wallet,           module: 'gastos' },
-  { type: 'item', name: 'Consolidado',  path: '/gastos/consolidado',     icon: BarChart3,        module: 'gastos' },
+  { type: 'item', name: 'Mis Gastos',   path: '/gastos/mis-gastos',      icon: Receipt,        module: 'gastos' },
+  { type: 'item', name: 'Aprobaciones', path: '/gastos/aprobaciones',    icon: BadgeDollarSign, module: 'gastos' },
+  { type: 'item', name: 'Reembolsos',   path: '/gastos/reembolsos',      icon: PiggyBank,       module: 'gastos' },
+  { type: 'item', name: 'Caja Chica',   path: '/gastos/reposicion-caja', icon: Wallet,          module: 'gastos' },
+  { type: 'item', name: 'Consolidado',  path: '/gastos/consolidado',     icon: BarChart3,       module: 'gastos' },
 
-  // ── COMERCIAL ─────────────────────────────────────────────
   { type: 'section', name: 'COMERCIAL', icon: TrendingUp },
   { type: 'item', name: 'Pipeline',            path: '/comercial/pipeline',         icon: TrendingUp, module: 'comercial' },
   { type: 'item', name: 'Nueva Cotización',    path: '/comercial/cotizacion/nueva', icon: FileText,   module: 'comercial' },
@@ -86,20 +84,17 @@ const MENU_STRUCTURE = [
   { type: 'item', name: 'Anticipo / Proyecto', path: '/comercial/anticipo',         icon: Zap,        module: 'comercial' },
   { type: 'item', name: 'Dashboard Comercial', path: '/comercial/dashboard',        icon: BarChart2,  module: 'comercial' },
 
-  // ── FACTURACIÓN ───────────────────────────────────────────
   { type: 'section', name: 'FACTURACIÓN', icon: Stamp },
   { type: 'item', name: 'Mis Facturas',  path: '/facturacion',       icon: ReceiptText, module: 'facturacion' },
   { type: 'item', name: 'Nueva Factura', path: '/facturacion/nueva', icon: FilePlus2,   module: 'facturacion' },
 
-  // ── TESORERÍA ─────────────────────────────────────────────
   { type: 'section', name: 'TESORERÍA', icon: Landmark },
-  { type: 'item', name: 'Posición de Caja',     path: '/tesoreria',               icon: Landmark,     module: 'tesoreria' },
-  { type: 'item', name: 'Bancos',               path: '/tesoreria/bancos',         icon: Building2,    module: 'tesoreria' },
-  { type: 'item', name: 'Conciliación',         path: '/tesoreria/conciliacion',   icon: GitMerge,     module: 'tesoreria' },
-  { type: 'item', name: 'Cuentas por Cobrar',   path: '/tesoreria/cxc',           icon: TrendingUp,   module: 'tesoreria' },
-  { type: 'item', name: 'Cuentas por Pagar',    path: '/tesoreria/cxp',           icon: TrendingDown, module: 'tesoreria' },
+  { type: 'item', name: 'Posición de Caja',   path: '/tesoreria',             icon: Landmark,     module: 'tesoreria' },
+  { type: 'item', name: 'Bancos',             path: '/tesoreria/bancos',       icon: Building2,    module: 'tesoreria' },
+  { type: 'item', name: 'Conciliación',       path: '/tesoreria/conciliacion', icon: GitMerge,     module: 'tesoreria' },
+  { type: 'item', name: 'Cuentas por Cobrar', path: '/tesoreria/cxc',          icon: TrendingUp,   module: 'tesoreria' },
+  { type: 'item', name: 'Cuentas por Pagar',  path: '/tesoreria/cxp',          icon: TrendingDown, module: 'tesoreria' },
 
-  // ── RELACIONES COMERCIALES ───────────────────────────────
   { type: 'section', name: 'RELACIONES COMERCIALES', icon: Handshake },
   {
     type: 'group', name: 'Clientes y Proveedores', icon: Handshake, module: 'fiscal',
@@ -108,7 +103,6 @@ const MENU_STRUCTURE = [
     ],
   },
 
-  // ── FINANZAS ─────────────────────────────────────────────
   { type: 'section', name: 'FINANZAS', icon: Scale },
   {
     type: 'group', name: 'Gestión Financiera', icon: Scale, module: 'fiscal',
@@ -122,21 +116,19 @@ const MENU_STRUCTURE = [
     ],
   },
 
-  // ── ANÁLISIS Y REPORTES ──────────────────────────────────
   { type: 'section', name: 'ANÁLISIS Y REPORTES', icon: BarChart2 },
   { type: 'item', name: 'Reportes',             path: '/reports',                   icon: BarChart2,  module: 'reports' },
   { type: 'item', name: 'Avance de Proyectos',  path: '/reports/projects-progress', icon: TrendingUp, module: 'reports' },
   { type: 'item', name: 'Avance por Nodo',      path: '/reports/node-progress',     icon: GitBranch,  module: 'reports' },
   { type: 'item', name: 'Reportes Financieros', path: '/reportes/financieros',      icon: DollarSign, module: 'reports' },
 
-  // ── ADMINISTRACIÓN ───────────────────────────────────────
   { type: 'section', name: 'ADMINISTRACIÓN', icon: Settings },
   { type: 'item', name: 'Usuarios',       path: '/admin/users',         icon: Users,             module: 'users_admin'  },
   { type: 'item', name: 'Config. Gastos', path: '/admin/gastos-config', icon: SlidersHorizontal, module: 'gastos_admin' },
   {
     type: 'group', name: 'Configuración', icon: Settings, module: 'settings',
     children: [
-      { name: 'Empresa',    path: '/settings/company', icon: Building2,  module: 'settings' },
+      { name: 'Empresa', path: '/settings/company', icon: Building2, module: 'settings' },
     ],
   },
 ]
@@ -269,8 +261,16 @@ const SectionHeader = ({ name, icon: Icon, isOpen, isActive, onToggle }) => (
 // ─────────────────────────────────────────────────────────────
 export const Sidebar = ({ isOpen = false, onClose = () => {} }) => {
   const { canAccess } = usePermission()
-  const location      = useLocation()
+  const { empresaConfig } = useAuth()  // ← NUEVO: logo dinámico
+  const location = useLocation()
   const [showPrefs, setShowPrefs] = useState(false)
+
+  // Logo dinámico: usa el de la empresa si existe, sino el de OBRIX
+  const logoSrc    = empresaConfig?.logo_url || '/Obrix_V3_web.png'
+  const logoSrcSet = empresaConfig?.logo_url
+    ? `${empresaConfig.logo_url} 1x, ${empresaConfig.logo_url} 2x`
+    : '/Obrix_V3_web.png 1x, /Obrix_V3.png 2x'
+  const logoAlt    = empresaConfig?.razon_social || 'Obrix'
 
   const activeSectionName = getSectionOfPath(location.pathname)
 
@@ -320,7 +320,6 @@ export const Sidebar = ({ isOpen = false, onClose = () => {} }) => {
     })
   }
 
-  // Drag & Drop favoritos
   const dragIdx = useRef(null)
   const [dragOver, setDragOver] = useState(null)
 
@@ -342,14 +341,12 @@ export const Sidebar = ({ isOpen = false, onClose = () => {} }) => {
 
   const [search, setSearch] = useState('')
 
-  // Módulos permitidos sin verificación adicional
   const MODULOS_LIBRES = new Set([
     'fiscal','compras','personal','gastos','gastos_admin',
     'comercial','settings','facturacion','tesoreria',
   ])
   const canAccessFiscal = (module) => MODULOS_LIBRES.has(module) ? true : canAccess(module)
 
-  // ── Render del menú ──────────────────────────────────────
   const renderMenu = () => {
     if (search) {
       return MENU_STRUCTURE
@@ -432,13 +429,18 @@ export const Sidebar = ({ isOpen = false, onClose = () => {} }) => {
       <div style={{ width: '260px', height: '100vh', position: 'fixed', left: 0, top: 0, backgroundColor: '#ffffff', borderRight: '1px solid #e5e7eb', display: 'flex', flexDirection: 'column', zIndex: 50, transition: 'transform 0.3s ease' }}
         className={`sidebar-panel ${isOpen ? 'sidebar-open' : ''}`}
       >
-        {/* Logo */}
+        {/* ── Logo dinámico ── */}
         <div style={{ height: '64px', display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '0 16px', borderBottom: '1px solid #e5e7eb', flexShrink: 0 }}>
           <img
-            src="/Obrix_V3_web.png"
-            srcSet="/Obrix_V3_web.png 1x, /Obrix_V3.png 2x"
-            alt="Obrix"
+            src={logoSrc}
+            srcSet={logoSrcSet}
+            alt={logoAlt}
             style={{ height: '52px', width: 'auto', maxWidth: '180px', objectFit: 'contain', display: 'block' }}
+            onError={e => {
+              // Fallback al logo de OBRIX si la URL del cliente falla
+              e.currentTarget.src    = '/Obrix_V3_web.png'
+              e.currentTarget.srcset = '/Obrix_V3_web.png 1x, /Obrix_V3.png 2x'
+            }}
           />
           <button onClick={onClose} className="sidebar-close-btn" style={{ padding: '6px', borderRadius: '8px', border: 'none', backgroundColor: 'transparent', cursor: 'pointer', color: '#6b7280', display: 'none' }}>
             <X size={20} />

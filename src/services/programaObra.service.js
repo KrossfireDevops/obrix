@@ -191,6 +191,114 @@ export async function eliminarCalendario(id) {
   if (error) throw error
 }
 
+/**
+ * Clona un calendario existente como base para uno personalizado.
+ * Copia días y excepciones. El clon NO es general por defecto.
+ */
+export async function clonarCalendario(calendarId, nuevoNombre) {
+  const { companyId } = await getCtx()
+
+  // Leer calendario original completo
+  const { data: original, error: errOrig } = await supabase
+    .from('work_calendars')
+    .select(`*, work_calendar_days(*), work_calendar_exceptions(*)`)
+    .eq('id', calendarId)
+    .single()
+  if (errOrig) throw errOrig
+
+  // Crear nuevo calendario sin es_general
+  const { data: nuevo, error: errNuevo } = await supabase
+    .from('work_calendars')
+    .insert({
+      company_id:  companyId,
+      nombre:      nuevoNombre || `${original.nombre} (copia)`,
+      descripcion: original.descripcion,
+      es_general:  false,
+      hora_inicio: original.hora_inicio,
+      hora_fin:    original.hora_fin,
+    })
+    .select()
+    .single()
+  if (errNuevo) throw errNuevo
+
+  // Copiar días
+  if (original.work_calendar_days?.length) {
+    const dias = original.work_calendar_days.map(d => ({
+      calendar_id: nuevo.id,
+      dow:         d.dow,
+      es_habil:    d.es_habil,
+      hora_inicio: d.hora_inicio,
+      hora_fin:    d.hora_fin,
+    }))
+    await supabase.from('work_calendar_days').insert(dias)
+  }
+
+  // Copiar excepciones (sin project_id — aplica al nuevo calendario)
+  if (original.work_calendar_exceptions?.length) {
+    const excs = original.work_calendar_exceptions.map(e => ({
+      calendar_id: nuevo.id,
+      company_id:  companyId,
+      fecha:       e.fecha,
+      tipo:        e.tipo,
+      descripcion: e.descripcion,
+      es_habil:    e.es_habil,
+      hora_inicio: e.hora_inicio,
+      hora_fin:    e.hora_fin,
+    }))
+    await supabase.from('work_calendar_exceptions').insert(excs)
+  }
+
+  return nuevo
+}
+
+/**
+ * Precarga los días festivos oficiales de México (Ley Federal del Trabajo)
+ * para el año indicado en el calendario dado.
+ * Art. 74 LFT + festivos opcionales de uso común en construcción.
+ */
+export async function precargarFestivosLFT(calendarId, año = new Date().getFullYear()) {
+  const { companyId } = await getCtx()
+
+  // ── Festivos obligatorios Art. 74 LFT ──────────────────────
+  const festivos = [
+    { fecha: `${año}-01-01`, descripcion: 'Año Nuevo',                           tipo: 'festivo' },
+    { fecha: `${año}-02-03`, descripcion: 'Día de la Constitución (1er lunes Feb)', tipo: 'festivo' },
+    { fecha: `${año}-03-17`, descripcion: 'Natalicio Benito Juárez (3er lunes Mar)', tipo: 'festivo' },
+    { fecha: `${año}-05-01`, descripcion: 'Día del Trabajo',                     tipo: 'festivo' },
+    { fecha: `${año}-09-16`, descripcion: 'Día de la Independencia',             tipo: 'festivo' },
+    { fecha: `${año}-11-17`, descripcion: 'Revolución Mexicana (3er lunes Nov)', tipo: 'festivo' },
+    { fecha: `${año}-12-25`, descripcion: 'Navidad',                             tipo: 'festivo' },
+    // Elecciones (cada 3 y 6 años — se agrega manualmente cuando aplique)
+  ]
+
+  // ── Festivos opcionales comunes en construcción ─────────────
+  const optativos = [
+    { fecha: `${año}-04-17`, descripcion: 'Jueves Santo (tradicional)',          tipo: 'festivo' },
+    { fecha: `${año}-04-18`, descripcion: 'Viernes Santo',                       tipo: 'festivo' },
+    { fecha: `${año}-11-01`, descripcion: 'Día de Todos Santos',                 tipo: 'festivo' },
+    { fecha: `${año}-11-02`, descripcion: 'Día de Muertos',                     tipo: 'festivo' },
+    { fecha: `${año}-12-12`, descripcion: 'Día de la Virgen de Guadalupe',       tipo: 'festivo' },
+  ]
+
+  const todos = [...festivos, ...optativos].map(f => ({
+    calendar_id:        calendarId,
+    company_id:         companyId,
+    fecha:              f.fecha,
+    tipo:               f.tipo,
+    descripcion:        f.descripcion,
+    es_habil:           false,
+    aplica_todas_obras: true,
+  }))
+
+  // Upsert para no duplicar si se llama varias veces
+  const { error } = await supabase
+    .from('work_calendar_exceptions')
+    .upsert(todos, { onConflict: 'calendar_id,fecha', ignoreDuplicates: true })
+
+  if (error) throw error
+  return todos.length
+}
+
 // ─────────────────────────────────────────────────────────────
 // 2. EXCEPCIONES DEL CALENDARIO
 // ─────────────────────────────────────────────────────────────

@@ -1,5 +1,13 @@
 // src/pages/auth/Login.jsx
-import { useState } from 'react'
+// v2.0 — Abril 2026
+// Cambios:
+//   - Logo dinámico: lee 'obrix_empresa_logo' de localStorage
+//     (se guarda al hacer login exitoso en AuthContext)
+//     Si no existe, muestra el logo de OBRIX como fallback.
+//   - Al hacer login exitoso, AuthContext guarda el logo en localStorage
+//     para que esté disponible en la próxima visita a esta pantalla.
+
+import { useState, useEffect } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { useAuth } from '../../context/AuthContext'
 import { AlertCircle, Eye, EyeOff, LogIn } from 'lucide-react'
@@ -8,10 +16,29 @@ export const Login = () => {
   const navigate = useNavigate()
   const { user, loading, login, logout, isAuthenticated } = useAuth()
 
-  const [error,       setError]       = useState('')
-  const [formData,    setFormData]    = useState({ email: '', password: '' })
-  const [showPass,    setShowPass]    = useState(false)
-  const [submitting,  setSubmitting]  = useState(false)
+  const [error,      setError]      = useState('')
+  const [formData,   setFormData]   = useState({ email: '', password: '' })
+  const [showPass,   setShowPass]   = useState(false)
+  const [submitting, setSubmitting] = useState(false)
+
+  // ── Logo dinámico ─────────────────────────────────────────
+  // Lee el logo guardado en localStorage del último login.
+  // Primera visita → logo OBRIX. Visitas posteriores → logo empresa.
+  const [logoSrc, setLogoSrc] = useState(() => {
+    try {
+      return localStorage.getItem('obrix_empresa_logo') || '/Obrix_V3_web.png'
+    } catch {
+      return '/Obrix_V3_web.png'
+    }
+  })
+  const [logoError, setLogoError] = useState(false)
+
+  const handleLogoError = () => {
+    // Si el logo de la empresa falla (URL expirada, etc.) → fallback a OBRIX
+    setLogoSrc('/Obrix_V3_web.png')
+    setLogoError(true)
+    try { localStorage.removeItem('obrix_empresa_logo') } catch {}
+  }
 
   const handleSubmit = async (e) => {
     e.preventDefault()
@@ -39,7 +66,6 @@ export const Login = () => {
     }
   }
 
-  // Cargando contexto de auth
   if (loading) {
     return (
       <div style={styles.fullPage}>
@@ -48,7 +74,6 @@ export const Login = () => {
     )
   }
 
-  // Ya autenticado
   if (isAuthenticated) {
     navigate('/dashboard')
     return null
@@ -57,12 +82,11 @@ export const Login = () => {
   return (
     <div style={styles.fullPage}>
 
-      {/* Fondo con patrón sutil */}
       <div style={styles.bgPattern} />
 
-      {/* Card de login mejorada */}
       <div style={styles.card}>
 
+        {/* Panel izquierdo — hero */}
         <div style={styles.heroPanel}>
           <div style={styles.heroBadge}>OBRIX ERP</div>
           <h1 style={styles.heroTitle}>Control de obra y finanzas en un solo lugar</h1>
@@ -88,13 +112,21 @@ export const Login = () => {
           </div>
         </div>
 
+        {/* Panel derecho — formulario */}
         <div style={styles.formPanel}>
+
+          {/* ── Logo dinámico ── */}
           <div style={styles.logoWrap}>
             <img
-              src="/Obrix_V3_web.png"
-              srcSet="/Obrix_V3_web.png 1x, /Obrix_V3.png 2x"
+              src={logoSrc}
+              srcSet={
+                logoSrc === '/Obrix_V3_web.png'
+                  ? '/Obrix_V3_web.png 1x, /Obrix_V3.png 2x'
+                  : `${logoSrc} 1x, ${logoSrc} 2x`
+              }
               alt="OBRIX Construction ERP"
               style={styles.logo}
+              onError={handleLogoError}
             />
           </div>
 
@@ -104,7 +136,6 @@ export const Login = () => {
             </p>
           </div>
 
-          {/* Error */}
           {error && (
             <div style={styles.errorBox}>
               <AlertCircle size={15} style={{ flexShrink: 0, marginTop: 1 }} />
@@ -112,10 +143,8 @@ export const Login = () => {
             </div>
           )}
 
-          {/* Formulario */}
           <form onSubmit={handleSubmit} style={styles.form}>
 
-            {/* Email */}
             <div style={styles.fieldWrap}>
               <label style={styles.label}>Correo electrónico</label>
               <input
@@ -126,12 +155,11 @@ export const Login = () => {
                 required
                 disabled={submitting}
                 style={styles.input}
-                onFocus={e  => e.target.style.borderColor = '#2563EB'}
-                onBlur={e   => e.target.style.borderColor = '#E5E7EB'}
+                onFocus={e => e.target.style.borderColor = '#2563EB'}
+                onBlur={e  => e.target.style.borderColor = '#E5E7EB'}
               />
             </div>
 
-            {/* Contraseña */}
             <div style={styles.fieldWrap}>
               <label style={styles.label}>Contraseña</label>
               <div style={{ position: 'relative' }}>
@@ -159,7 +187,6 @@ export const Login = () => {
               </div>
             </div>
 
-            {/* Botón */}
             <button
               type="submit"
               disabled={submitting}
@@ -185,7 +212,6 @@ export const Login = () => {
             </button>
           </form>
 
-          {/* Footer */}
           <p style={styles.footer}>
             © {new Date().getFullYear()} OBRIX ERP · DINNOVAC
           </p>
@@ -205,7 +231,7 @@ export const Login = () => {
   )
 }
 
-// ─── Estilos ──────────────────────────────────────────────────
+// ─── Estilos — idénticos a v1.0 ───────────────────────────────
 const styles = {
   fullPage: {
     minHeight: '100vh',
@@ -217,8 +243,6 @@ const styles = {
     position: 'relative',
     overflow: 'hidden',
   },
-
-  // Patrón de fondo sutil
   bgPattern: {
     position: 'fixed',
     inset: 0,
@@ -230,7 +254,6 @@ const styles = {
     `,
     pointerEvents: 'none',
   },
-
   card: {
     position: 'relative',
     width: '100%',
@@ -246,7 +269,6 @@ const styles = {
     animation: 'fadeUp 0.35s ease',
     overflow: 'hidden',
   },
-
   heroPanel: {
     position: 'relative',
     display: 'flex',
@@ -260,7 +282,6 @@ const styles = {
     overflow: 'hidden',
     minHeight: 420,
   },
-
   heroBadge: {
     display: 'inline-flex',
     alignItems: 'center',
@@ -275,7 +296,6 @@ const styles = {
     textTransform: 'uppercase',
     width: 'fit-content',
   },
-
   heroTitle: {
     fontSize: 32,
     lineHeight: 1.08,
@@ -283,7 +303,6 @@ const styles = {
     color: '#0F172A',
     margin: 0,
   },
-
   heroText: {
     fontSize: 15,
     lineHeight: 1.75,
@@ -291,13 +310,11 @@ const styles = {
     maxWidth: 420,
     margin: 0,
   },
-
   heroStats: {
     display: 'grid',
     gridTemplateColumns: 'repeat(2, minmax(0, 1fr))',
     gap: 14,
   },
-
   statCard: {
     padding: '14px 16px',
     borderRadius: 16,
@@ -305,21 +322,18 @@ const styles = {
     border: '1px solid rgba(226,232,240,0.8)',
     boxShadow: '0 8px 18px rgba(15,23,42,0.06)',
   },
-
   statValue: {
     display: 'block',
     fontSize: 20,
     fontWeight: 700,
     color: '#1D4ED8',
   },
-
   statLabel: {
     display: 'block',
     marginTop: 4,
     fontSize: 13,
     color: '#475569',
   },
-
   heroGraphic: {
     position: 'absolute',
     right: -24,
@@ -328,39 +342,29 @@ const styles = {
     height: 220,
     pointerEvents: 'none',
   },
-
   heroShapeLarge: {
     position: 'absolute',
-    right: 0,
-    bottom: 0,
-    width: 180,
-    height: 180,
+    right: 0, bottom: 0,
+    width: 180, height: 180,
     borderRadius: 28,
     background: 'radial-gradient(circle at 30% 30%, rgba(59,130,246,0.28), rgba(37,99,235,0.06))',
     filter: 'blur(12px)',
   },
-
   heroShapeSmall: {
     position: 'absolute',
-    left: 18,
-    top: 42,
-    width: 96,
-    height: 96,
+    left: 18, top: 42,
+    width: 96, height: 96,
     borderRadius: 24,
     background: 'radial-gradient(circle at 50% 50%, rgba(96,165,250,0.28), rgba(37,99,235,0.08))',
     filter: 'blur(8px)',
   },
-
   heroShapeCircle: {
     position: 'absolute',
-    left: 52,
-    bottom: 18,
-    width: 48,
-    height: 48,
+    left: 52, bottom: 18,
+    width: 48, height: 48,
     borderRadius: '50%',
     background: 'rgba(59,130,246,0.18)',
   },
-
   formPanel: {
     display: 'flex',
     flexDirection: 'column',
@@ -371,13 +375,11 @@ const styles = {
     boxShadow: '0 18px 50px rgba(15,23,42,0.08)',
     border: '1px solid rgba(229,231,235,0.95)',
   },
-
   logoWrap: {
     display: 'flex',
     justifyContent: 'center',
     marginBottom: 24,
   },
-
   logo: {
     width: 'auto',
     height: 64,
@@ -386,25 +388,15 @@ const styles = {
     display: 'block',
     imageRendering: 'auto',
   },
-
   header: {
     textAlign: 'center',
     marginBottom: 16,
   },
-
-  titulo: {
-    fontSize: 22,
-    fontWeight: 700,
-    color: '#111827',
-    margin: '0 0 6px',
-  },
-
   subtitulo: {
     fontSize: 14,
     color: '#475569',
     margin: 0,
   },
-
   errorBox: {
     display: 'flex',
     alignItems: 'flex-start',
@@ -418,25 +410,21 @@ const styles = {
     marginBottom: 20,
     lineHeight: 1.5,
   },
-
   form: {
     display: 'flex',
     flexDirection: 'column',
     gap: 18,
   },
-
   fieldWrap: {
     display: 'flex',
     flexDirection: 'column',
     gap: 6,
   },
-
   label: {
     fontSize: 13,
     fontWeight: 600,
     color: '#374151',
   },
-
   input: {
     width: '100%',
     padding: '12px 14px',
@@ -450,7 +438,6 @@ const styles = {
     transition: 'border-color 0.15s, box-shadow 0.15s',
     fontFamily: 'inherit',
   },
-
   eyeBtn: {
     position: 'absolute',
     right: 12,
@@ -464,7 +451,6 @@ const styles = {
     alignItems: 'center',
     justifyContent: 'center',
   },
-
   submitBtn: {
     display: 'flex',
     alignItems: 'center',
@@ -482,7 +468,6 @@ const styles = {
     transition: 'background-color 0.15s, transform 0.15s',
     fontFamily: 'inherit',
   },
-
   btnSpinner: {
     width: 16,
     height: 16,
@@ -491,7 +476,6 @@ const styles = {
     borderRadius: '50%',
     animation: 'spin 0.8s linear infinite',
   },
-
   spinner: {
     width: 36,
     height: 36,
@@ -500,7 +484,6 @@ const styles = {
     borderRadius: '50%',
     animation: 'spin 1s linear infinite',
   },
-
   footer: {
     fontSize: 11,
     color: '#9CA3AF',

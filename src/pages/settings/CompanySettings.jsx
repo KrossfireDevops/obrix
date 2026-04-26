@@ -1,24 +1,73 @@
 // src/pages/settings/CompanySettings.jsx
+// v2.0 FINAL — Abril 2026
+// Cambios vs v1.1:
+//   - Pestañas: "Configuración General" y "Formatos PDF"
+//   - Orden: Datos Fiscales → e.firma → CSD → Moneda
+//   - Validación cruzada RFC: CSD debe coincidir con RFC empresa
+//   - Datos Fiscales ampliados: domicilio, teléfono, email, web
+//   - FormatosTab integrada como segunda pestaña
+//   - Eliminadas: Sección Niveles de Aprobación y Factores de Costo
+//   - Conservados: catálogo completo 18 regímenes, animaciones,
+//     disabled en botón Cancelar modal, transiciones en AreaCarga,
+//     mensajes detallados de error, botón Restablecer
+
 import { useState, useEffect } from 'react'
 import { MainLayout } from '../../components/layout/MainLayout'
 import { RequirePermission } from '../../components/auth/PermissionGuard'
 import { useToast } from '../../hooks/useToast'
 import { supabase } from '../../config/supabase'
 import * as service from '../../services/companySettings.service'
+import FormatosTab      from './FormatosTab'
+import LogotiposSection from './LogotiposSection'
 import {
-  DollarSign, TrendingUp, Shield, Save, RefreshCw, Building2, Info,
-  KeyRound, Upload, CheckCircle2, AlertTriangle, Eye, EyeOff,
-  Trash2, RotateCcw, FileKey2, ShieldCheck, X, AlertOctagon
+  DollarSign, Shield, Save, RefreshCw, Building2, Info,
+  Upload, CheckCircle2, AlertTriangle, Eye, EyeOff,
+  Trash2, RotateCcw, FileKey2, ShieldCheck, X, AlertOctagon,
+  Receipt, FileText, ImageIcon,
 } from 'lucide-react'
 
-// ─────────────────────────────────────────────────────────────────────────────
-// Componentes base
-// ─────────────────────────────────────────────────────────────────────────────
+// ─────────────────────────────────────────────────────────────
+// Catálogo completo de regímenes fiscales SAT (18 regímenes)
+// ─────────────────────────────────────────────────────────────
+const REGIMENES_FISCALES = [
+  { value: '601', label: '601 — General de Ley Personas Morales' },
+  { value: '603', label: '603 — Personas Morales con Fines no Lucrativos' },
+  { value: '605', label: '605 — Sueldos y Salarios e Ingresos Asimilados' },
+  { value: '606', label: '606 — Arrendamiento' },
+  { value: '607', label: '607 — Régimen de Enajenación o Adquisición de Bienes' },
+  { value: '608', label: '608 — Demás Ingresos' },
+  { value: '610', label: '610 — Residentes en el Extranjero sin EP en México' },
+  { value: '611', label: '611 — Ingresos por Dividendos' },
+  { value: '612', label: '612 — Personas Físicas con Actividades Empresariales' },
+  { value: '614', label: '614 — Ingresos por intereses' },
+  { value: '616', label: '616 — Sin obligaciones fiscales' },
+  { value: '620', label: '620 — Sociedades Cooperativas de Producción' },
+  { value: '621', label: '621 — Incorporación Fiscal' },
+  { value: '622', label: '622 — Actividades Agrícolas, Ganaderas, Silvícolas y Pesqueras' },
+  { value: '623', label: '623 — Opcional para Grupos de Sociedades' },
+  { value: '624', label: '624 — Coordinados' },
+  { value: '625', label: '625 — Régimen de las Actividades Empresariales con ingresos a través de Plataformas Tecnológicas' },
+  { value: '626', label: '626 — Régimen Simplificado de Confianza (RESICO)' },
+]
 
-const Field = ({ label, hint, children, style = {} }) => (
+// ─────────────────────────────────────────────────────────────
+// Validador de RFC México
+// ─────────────────────────────────────────────────────────────
+function validarRFC(rfc) {
+  if (!rfc) return false
+  return /^[A-ZÑ&]{3,4}\d{6}[A-Z0-9]{3}$/i.test(rfc.trim())
+}
+
+// ─────────────────────────────────────────────────────────────
+// Componentes base
+// ─────────────────────────────────────────────────────────────
+const Field = ({ label, hint, required, children, style = {} }) => (
   <div style={{ marginBottom: '16px', ...style }}>
     <div style={{ display: 'flex', alignItems: 'center', gap: '6px', marginBottom: '6px' }}>
-      <label style={{ fontSize: '13px', fontWeight: '600', color: '#374151' }}>{label}</label>
+      <label style={{ fontSize: '13px', fontWeight: '600', color: '#374151' }}>
+        {label}
+        {required && <span style={{ color: '#dc2626', marginLeft: '3px' }}>*</span>}
+      </label>
       {hint && (
         <div style={{ position: 'relative', display: 'inline-flex' }} className="hint-container">
           <Info size={13} color="#9ca3af" style={{ cursor: 'help' }} />
@@ -38,7 +87,7 @@ const Field = ({ label, hint, children, style = {} }) => (
   </div>
 )
 
-const Section = ({ icon: Icon, title, subtitle, children, accentColor = '#2563eb' }) => (
+const Section = ({ icon: Icon, title, subtitle, children, accentColor = '#2563eb', badge }) => (
   <div style={{
     backgroundColor: '#fff', border: '1px solid #e5e7eb',
     borderRadius: '16px', overflow: 'hidden', marginBottom: '20px',
@@ -55,30 +104,49 @@ const Section = ({ icon: Icon, title, subtitle, children, accentColor = '#2563eb
       }}>
         <Icon size={18} color={accentColor} />
       </div>
-      <div>
+      <div style={{ flex: 1 }}>
         <p style={{ fontSize: '14px', fontWeight: '700', color: '#111827', margin: 0 }}>{title}</p>
         {subtitle && <p style={{ fontSize: '12px', color: '#6b7280', margin: '2px 0 0' }}>{subtitle}</p>}
       </div>
+      {badge}
     </div>
     <div style={{ padding: '20px' }}>{children}</div>
   </div>
 )
 
-// ─────────────────────────────────────────────────────────────────────────────
-// Modal de confirmación de eliminación (inline, dentro de la sección)
-// ─────────────────────────────────────────────────────────────────────────────
+// ─────────────────────────────────────────────────────────────
+// Badge de completitud
+// ─────────────────────────────────────────────────────────────
+const BadgeCompleto = ({ completo, texto }) => (
+  <div style={{
+    display: 'flex', alignItems: 'center', gap: '5px',
+    padding: '4px 10px', borderRadius: '20px', fontSize: '11px', fontWeight: '600',
+    backgroundColor: completo ? '#f0fdf4' : '#fffbeb',
+    color: completo ? '#15803d' : '#92400e',
+    border: `1px solid ${completo ? '#bbf7d0' : '#fde68a'}`,
+    flexShrink: 0,
+  }}>
+    {completo
+      ? <CheckCircle2 size={11} color="#16a34a" />
+      : <AlertTriangle size={11} color="#d97706" />
+    }
+    {texto}
+  </div>
+)
+
+// ─────────────────────────────────────────────────────────────
+// Modal de confirmación de eliminación
+// Conservado de v1.1: disabled + opacity en botón Cancelar,
+// animación fadeInDown
+// ─────────────────────────────────────────────────────────────
 const ModalEliminar = ({ tipo, onCancelar, onAceptar, eliminando }) => {
   const esCSD = tipo === 'csd'
   return (
     <div style={{
-      backgroundColor: '#fff9f9',
-      border: '2px solid #fecaca',
-      borderRadius: '14px',
-      padding: '20px',
-      marginBottom: '16px',
+      backgroundColor: '#fff9f9', border: '2px solid #fecaca',
+      borderRadius: '14px', padding: '20px', marginBottom: '16px',
       animation: 'fadeInDown 0.2s ease',
     }}>
-      {/* Encabezado */}
       <div style={{ display: 'flex', alignItems: 'flex-start', gap: '14px', marginBottom: '16px' }}>
         <div style={{
           width: '44px', height: '44px', borderRadius: '12px',
@@ -93,20 +161,17 @@ const ModalEliminar = ({ tipo, onCancelar, onAceptar, eliminando }) => {
           </p>
           <p style={{ fontSize: '13px', color: '#7f1d1d', margin: '0 0 4px', lineHeight: '1.5' }}>
             {esCSD
-              ? 'Sin el CSD no podrás generar ni timbrar facturas (CFDIs) en el sistema. Esta acción eliminará los archivos del servidor.'
-              : 'Sin la e.firma el Buzón Fiscal SAT dejará de funcionar y no podrás descargar CFDIs. Esta acción eliminará los archivos del servidor.'}
+              ? 'Sin el CSD no podrás generar ni timbrar facturas (CFDIs) en el sistema.'
+              : 'Sin la e.firma el Buzón Fiscal SAT dejará de funcionar y no podrás descargar CFDIs.'}
           </p>
           <p style={{ fontSize: '12px', color: '#b91c1c', margin: 0, fontWeight: '600' }}>
             ⚠️ Para reactivarlo deberás volver a cargar y validar los certificados.
           </p>
         </div>
       </div>
-
-      {/* Separador */}
       <div style={{ borderTop: '1px solid #fecaca', marginBottom: '16px' }} />
-
-      {/* Botones */}
       <div style={{ display: 'flex', gap: '10px', justifyContent: 'flex-end' }}>
+        {/* Conservado de v1.1: disabled + opacity en Cancelar */}
         <button
           onClick={onCancelar}
           disabled={eliminando}
@@ -116,7 +181,6 @@ const ModalEliminar = ({ tipo, onCancelar, onAceptar, eliminando }) => {
             color: '#374151', cursor: eliminando ? 'not-allowed' : 'pointer',
             fontSize: '13px', fontWeight: '600',
             opacity: eliminando ? 0.5 : 1,
-            transition: 'background-color 0.15s',
           }}
         >
           Cancelar
@@ -130,7 +194,6 @@ const ModalEliminar = ({ tipo, onCancelar, onAceptar, eliminando }) => {
             backgroundColor: eliminando ? '#fca5a5' : '#dc2626',
             color: '#fff', cursor: eliminando ? 'not-allowed' : 'pointer',
             fontSize: '13px', fontWeight: '600',
-            transition: 'background-color 0.2s',
           }}
         >
           <Trash2 size={14} />
@@ -141,29 +204,34 @@ const ModalEliminar = ({ tipo, onCancelar, onAceptar, eliminando }) => {
   )
 }
 
-// ─────────────────────────────────────────────────────────────────────────────
-// Área de carga: .cer + .key + contraseña + Validar + Guardar
-// ─────────────────────────────────────────────────────────────────────────────
-const AreaCarga = ({ estado, color, colorBg, onCambiar, onValidar, onGuardar, labelGuardar, labelPass }) => (
+// ─────────────────────────────────────────────────────────────
+// Área de carga: .cer + .key + contraseña + nombre manual
+// Conservado de v1.1: transition en label de archivo,
+// mensaje detallado en campo nombre manual
+// ─────────────────────────────────────────────────────────────
+const AreaCarga = ({
+  estado, color, colorBg,
+  onCambiar, onValidar, onGuardar, onLimpiar,
+  labelGuardar, labelPass,
+  mostrarNombreManual = false,
+}) => (
   <>
     <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '12px', marginBottom: '14px' }}>
       {[
         { campo: 'cer', nombreCampo: 'cerNombre', etiqueta: 'Certificado (.cer)', acepta: '.cer' },
         { campo: 'key', nombreCampo: 'keyNombre', etiqueta: 'Llave privada (.key)', acepta: '.key' },
       ].map(({ campo, nombreCampo, etiqueta, acepta }) => (
-        <Field key={campo} label={etiqueta} style={{ marginBottom: 0 }}>
+        <Field key={campo} label={etiqueta} required style={{ marginBottom: 0 }}>
           <label style={{
             display: 'flex', flexDirection: 'column', alignItems: 'center',
             justifyContent: 'center', gap: '6px', padding: '18px 12px',
             borderRadius: '10px', cursor: 'pointer', minHeight: '80px',
             border: estado[nombreCampo] ? '2px solid #16a34a' : '2px dashed #d1d5db',
             backgroundColor: estado[nombreCampo] ? '#f0fdf4' : '#fafafa',
+            // Conservado de v1.1
             transition: 'border-color 0.2s, background-color 0.2s',
           }}>
-            <input
-              type="file"
-              accept={acepta}
-              style={{ display: 'none' }}
+            <input type="file" accept={acepta} style={{ display: 'none' }}
               onChange={e => {
                 const f = e.target.files[0]
                 if (f) {
@@ -187,7 +255,7 @@ const AreaCarga = ({ estado, color, colorBg, onCambiar, onValidar, onGuardar, la
     </div>
 
     {/* Contraseña */}
-    <Field label={labelPass} style={{ marginBottom: '14px' }}>
+    <Field label={labelPass} required style={{ marginBottom: '14px' }}>
       <div style={{ position: 'relative' }}>
         <input
           type={estado.showPassword ? 'text' : 'password'}
@@ -200,16 +268,13 @@ const AreaCarga = ({ estado, color, colorBg, onCambiar, onValidar, onGuardar, la
             fontSize: '14px', outline: 'none', boxSizing: 'border-box',
           }}
         />
-        <button
-          type="button"
-          onClick={() => onCambiar('showPassword', !estado.showPassword)}
+        <button type="button" onClick={() => onCambiar('showPassword', !estado.showPassword)}
           style={{
             position: 'absolute', right: '10px', top: '50%',
             transform: 'translateY(-50%)', background: 'none',
             border: 'none', cursor: 'pointer', padding: '4px',
             display: 'flex', alignItems: 'center',
-          }}
-        >
+          }}>
           {estado.showPassword ? <EyeOff size={15} color="#9ca3af" /> : <Eye size={15} color="#9ca3af" />}
         </button>
       </div>
@@ -244,35 +309,78 @@ const AreaCarga = ({ estado, color, colorBg, onCambiar, onValidar, onGuardar, la
             </div>
           ))}
         </div>
+
+        {/* Campo nombre manual — conservado de v1.1 con mensaje completo */}
+        {mostrarNombreManual && (
+          (estado.nombrePreview === 'No detectado' || !estado.nombrePreview) && (
+            <div style={{
+              marginTop: '12px', padding: '12px',
+              backgroundColor: '#fffbeb', border: '1px solid #fde68a', borderRadius: '8px',
+            }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: '6px', marginBottom: '8px' }}>
+                <AlertTriangle size={13} color="#d97706" />
+                <p style={{ fontSize: '12px', fontWeight: '600', color: '#92400e', margin: 0 }}>
+                  El nombre del titular no se pudo detectar automáticamente.
+                  Captúralo manualmente — es obligatorio para guardar.
+                </p>
+              </div>
+              <input
+                type="text"
+                placeholder="Nombre completo del titular de la e.firma"
+                value={estado.nombreManual || ''}
+                onChange={e => onCambiar('nombreManual', e.target.value)}
+                style={{
+                  width: '100%', padding: '9px 12px',
+                  border: '1.5px solid #f59e0b', borderRadius: '8px',
+                  fontSize: '13px', outline: 'none',
+                  boxSizing: 'border-box', backgroundColor: '#fff',
+                }}
+              />
+            </div>
+          )
+        )}
       </div>
     )}
 
-    {/* Botones Validar / Guardar */}
+    {/* Botones Validar / Cancelar / Guardar */}
     <div style={{ display: 'flex', gap: '10px' }}>
-      <button
-        onClick={onValidar}
-        disabled={estado.validando || estado.guardando}
+      <button onClick={onValidar} disabled={estado.validando || estado.guardando}
         style={{
           flex: estado.validado ? '0 0 auto' : 1,
           display: 'flex', alignItems: 'center', justifyContent: 'center',
           gap: '7px', padding: '11px 20px', borderRadius: '10px',
-          border: `1.5px solid ${color}`,
-          backgroundColor: '#fff', color,
+          border: `1.5px solid ${color}`, backgroundColor: '#fff', color,
           cursor: (estado.validando || estado.guardando) ? 'not-allowed' : 'pointer',
           fontSize: '13px', fontWeight: '600',
           opacity: (estado.validando || estado.guardando) ? 0.6 : 1,
-          transition: 'opacity 0.15s',
-          whiteSpace: 'nowrap',
-        }}
-      >
+          transition: 'opacity 0.15s', whiteSpace: 'nowrap',
+        }}>
         <Shield size={14} />
         {estado.validando ? 'Validando...' : 'Validar archivos'}
       </button>
 
+      {/* Cancelar — aparece cuando hay archivos seleccionados o ya se validó.
+          Limpia todo el formulario sin necesidad de recargar la página. */}
+      {(estado.cerNombre || estado.keyNombre || estado.validado) && !estado.guardando && (
+        <button onClick={onLimpiar}
+          style={{
+            display: 'flex', alignItems: 'center', justifyContent: 'center',
+            gap: '7px', padding: '11px 20px', borderRadius: '10px',
+            border: '1.5px solid #e5e7eb', backgroundColor: '#fff',
+            color: '#6b7280', cursor: 'pointer',
+            fontSize: '13px', fontWeight: '600',
+            transition: 'all 0.15s', whiteSpace: 'nowrap',
+          }}
+          onMouseEnter={e => { e.currentTarget.style.borderColor = '#d1d5db'; e.currentTarget.style.backgroundColor = '#f9fafb' }}
+          onMouseLeave={e => { e.currentTarget.style.borderColor = '#e5e7eb'; e.currentTarget.style.backgroundColor = '#fff' }}
+        >
+          <X size={14} />
+          Cancelar
+        </button>
+      )}
+
       {estado.validado && (
-        <button
-          onClick={onGuardar}
-          disabled={estado.guardando}
+        <button onClick={onGuardar} disabled={estado.guardando}
           style={{
             flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'center',
             gap: '7px', padding: '11px 20px', borderRadius: '10px',
@@ -280,10 +388,8 @@ const AreaCarga = ({ estado, color, colorBg, onCambiar, onValidar, onGuardar, la
             backgroundColor: estado.guardando ? colorBg : color,
             color: estado.guardando ? color : '#fff',
             cursor: estado.guardando ? 'not-allowed' : 'pointer',
-            fontSize: '13px', fontWeight: '700',
-            transition: 'all 0.2s',
-          }}
-        >
+            fontSize: '13px', fontWeight: '700', transition: 'all 0.2s',
+          }}>
           <Save size={14} />
           {estado.guardando ? 'Guardando...' : labelGuardar}
         </button>
@@ -297,9 +403,9 @@ const AreaCarga = ({ estado, color, colorBg, onCambiar, onValidar, onGuardar, la
   </>
 )
 
-// ─────────────────────────────────────────────────────────────────────────────
+// ─────────────────────────────────────────────────────────────
 // Alerta de vigencia próxima a vencer o vencida
-// ─────────────────────────────────────────────────────────────────────────────
+// ─────────────────────────────────────────────────────────────
 const AlertaVigencia = ({ vigencia }) => {
   if (!vigencia) return null
   const dias = Math.ceil((new Date(vigencia) - new Date()) / 86400000)
@@ -316,41 +422,50 @@ const AlertaVigencia = ({ vigencia }) => {
       <p style={{ fontSize: '12px', color: vencido ? '#991b1b' : '#92400e', margin: 0, fontWeight: '500' }}>
         {vencido
           ? '🚫 Certificado vencido — renuévalo inmediatamente para no perder funcionalidad.'
-          : `⚠️ Vence en ${dias} día${dias === 1 ? '' : 's'} — renueva antes de que expire para evitar interrupciones.`}
+          : `⚠️ Vence en ${dias} día${dias === 1 ? '' : 's'} — renueva antes de que expire.`}
       </p>
     </div>
   )
 }
 
-// ─────────────────────────────────────────────────────────────────────────────
+// ─────────────────────────────────────────────────────────────
 // Estado inicial de una firma digital
-// ─────────────────────────────────────────────────────────────────────────────
+// ─────────────────────────────────────────────────────────────
 const firmaInicial = () => ({
   cer: null, key: null, cerNombre: '', keyNombre: '',
-  password: '', showPassword: false,
-  modoRenovar: false,
+  password: '', showPassword: false, modoRenovar: false,
   validando: false, guardando: false, eliminando: false,
-  validado: false,
-  confirmarEliminar: false,       // ← controla si se muestra el modal inline
+  validado: false, confirmarEliminar: false,
   rfcPreview: '', nombrePreview: '', vigenciaPreview: '',
   cerB64Preview: '', keyB64Preview: '',
+  nombreManual: '',
   configurada: false, rfc: '', nombre: '', vigencia: '',
   noCertificado: '', updatedAt: '',
 })
 
-// ─────────────────────────────────────────────────────────────────────────────
-// Página Principal
-// ─────────────────────────────────────────────────────────────────────────────
+// ─────────────────────────────────────────────────────────────
+// PÁGINA PRINCIPAL
+// ─────────────────────────────────────────────────────────────
 export const CompanySettings = () => {
-  const [loading,     setLoading]     = useState(true)
-  const [saving,      setSaving]      = useState(false)
-  const [settings,    setSettings]    = useState({
-    approval_limit_jefe_obra: 2000,
-    currency:                 'MXN',
-    currency_symbol:          '$',
-    default_inflation_factor: 0,
-    default_management_cost:  0,
+  const [loading,       setLoading]       = useState(true)
+  const [tabActiva,     setTabActiva]     = useState('general')
+  const [savingFiscal,  setSavingFiscal]  = useState(false)
+  const [savingMoneda,  setSavingMoneda]  = useState(false)
+
+  // Datos fiscales ampliados (v2.0: + domicilio, telefono, email, web)
+  const [datosFiscales, setDatosFiscales] = useState({
+    rfc:              '',
+    razon_social:     '',
+    regimen_fiscal:   '601',
+    cp_fiscal:        '',
+    domicilio_fiscal: '',
+    telefono:         '',
+    email:            '',
+    web:              '',
   })
+  const [datosFiscalesCompletos, setDatosFiscalesCompletos] = useState(false)
+
+  const [moneda,      setMoneda]      = useState({ currency: 'MXN', currency_symbol: '$' })
   const [companyName, setCompanyName] = useState('')
   const [companyId,   setCompanyId]   = useState(null)
   const [csd,         setCsd]         = useState(firmaInicial())
@@ -360,8 +475,9 @@ export const CompanySettings = () => {
   const mutar = (setter) => (k, v) => setter(s => ({ ...s, [k]: v }))
   const mutarCsd    = mutar(setCsd)
   const mutarEfirma = mutar(setEfirma)
+  const setDF       = (k, v) => setDatosFiscales(s => ({ ...s, [k]: v }))
 
-  // ── Carga inicial ──────────────────────────────────────────────────────────
+  // ── Carga inicial ──────────────────────────────────────────
   useEffect(() => { cargarTodo() }, [])
 
   const cargarTodo = async () => {
@@ -370,16 +486,28 @@ export const CompanySettings = () => {
     if (error) {
       toast.warning('No se encontró configuración. Se usarán valores por defecto.')
     } else if (data) {
-      setSettings({
-        approval_limit_jefe_obra: data.approval_limit_jefe_obra,
-        currency:                 data.currency,
-        currency_symbol:          data.currency_symbol,
-        default_inflation_factor: parseFloat((data.default_inflation_factor * 100).toFixed(4)),
-        default_management_cost:  parseFloat((data.default_management_cost  * 100).toFixed(4)),
-      })
-      setCompanyName(data.companies?.name || '')
       const cid = data.company_id
       setCompanyId(cid)
+      setCompanyName(data.companies?.name || '')
+      setMoneda({
+        currency:        data.currency        || 'MXN',
+        currency_symbol: data.currency_symbol || '$',
+      })
+
+      const df = {
+        rfc:              data.rfc                     || '',
+        razon_social:     data.razon_social            || '',
+        regimen_fiscal:   data.regimen_fiscal_emisor   || '601',
+        cp_fiscal:        data.codigo_postal_fiscal    || '',
+        domicilio_fiscal: data.domicilio_fiscal        || '',
+        telefono:         data.telefono                || '',
+        email:            data.email                   || '',
+        web:              data.web                     || '',
+      }
+      setDatosFiscales(df)
+      setDatosFiscalesCompletos(
+        validarRFC(df.rfc) && df.razon_social.trim().length > 3 && df.cp_fiscal.trim().length === 5
+      )
 
       try {
         const { data: d } = await supabase
@@ -415,26 +543,7 @@ export const CompanySettings = () => {
     setLoading(false)
   }
 
-  const set = (key, val) => setSettings(s => ({ ...s, [key]: val }))
-
-  // ── Guardar configuración general ─────────────────────────────────────────
-  const handleSaveGeneral = async () => {
-    if (parseFloat(settings.approval_limit_jefe_obra) <= 0) {
-      toast.error('El límite de aprobación debe ser mayor a 0')
-      return
-    }
-    if (!settings.currency.trim() || !settings.currency_symbol.trim()) {
-      toast.error('La moneda y símbolo son obligatorios')
-      return
-    }
-    setSaving(true)
-    const { error } = await service.saveSettings(settings)
-    if (error) toast.error('Error al guardar: ' + error.message)
-    else       toast.success('✅ Configuración guardada correctamente')
-    setSaving(false)
-  }
-
-  // ── Helpers ───────────────────────────────────────────────────────────────
+  // ── Helpers ───────────────────────────────────────────────
   const toBase64 = (file) => new Promise((res, rej) => {
     const r = new FileReader()
     r.onload  = () => res(r.result.split(',')[1])
@@ -445,7 +554,7 @@ export const CompanySettings = () => {
   const getCompanyId = async () => {
     if (companyId) return companyId
     const { data: { user } } = await supabase.auth.getUser()
-    const { data: p }        = await supabase
+    const { data: p } = await supabase
       .from('users_profiles').select('company_id').eq('id', user.id).single()
     return p.company_id
   }
@@ -454,15 +563,81 @@ export const CompanySettings = () => {
     ...s, modoRenovar: false, validado: false,
     cer: null, key: null, cerNombre: '', keyNombre: '', password: '',
     rfcPreview: '', nombrePreview: '', vigenciaPreview: '',
-    cerB64Preview: '', keyB64Preview: '',
+    cerB64Preview: '', keyB64Preview: '', nombreManual: '',
   }))
 
-  // ─────────────────────────────────────────────────────────────────────────
-  // CSD
-  // ─────────────────────────────────────────────────────────────────────────
+  // ── Guardar Datos Fiscales ─────────────────────────────────
+  const handleSaveDatosFiscales = async () => {
+    if (!datosFiscales.rfc.trim()) {
+      toast.error('El RFC de la empresa es obligatorio'); return
+    }
+    if (!validarRFC(datosFiscales.rfc)) {
+      toast.error('El RFC no tiene un formato válido (ej: ABC123456XYZ)'); return
+    }
+    if (!datosFiscales.razon_social.trim() || datosFiscales.razon_social.trim().length < 3) {
+      toast.error('La razón social es obligatoria (mínimo 3 caracteres)'); return
+    }
+    if (!datosFiscales.regimen_fiscal) {
+      toast.error('El régimen fiscal es obligatorio'); return
+    }
+    if (!datosFiscales.cp_fiscal.trim() || datosFiscales.cp_fiscal.trim().length !== 5) {
+      toast.error('El código postal fiscal debe tener exactamente 5 dígitos'); return
+    }
+
+    setSavingFiscal(true)
+    try {
+      const cid = companyId || await getCompanyId()
+      const { error } = await supabase
+        .from('company_settings')
+        .update({
+          rfc:                   datosFiscales.rfc.trim().toUpperCase(),
+          razon_social:          datosFiscales.razon_social.trim().toUpperCase(),
+          regimen_fiscal_emisor: datosFiscales.regimen_fiscal,
+          codigo_postal_fiscal:  datosFiscales.cp_fiscal.trim(),
+          domicilio_fiscal:      datosFiscales.domicilio_fiscal.trim(),
+          telefono:              datosFiscales.telefono.trim(),
+          email:                 datosFiscales.email.trim(),
+          web:                   datosFiscales.web.trim(),
+        })
+        .eq('company_id', cid)
+      if (error) throw error
+      setDatosFiscalesCompletos(true)
+      toast.success('✅ Datos fiscales guardados correctamente')
+    } catch (e) {
+      toast.error('Error al guardar datos fiscales: ' + e.message)
+    } finally {
+      setSavingFiscal(false)
+    }
+  }
+
+  // ── Guardar Moneda ─────────────────────────────────────────
+  const handleSaveMoneda = async () => {
+    if (!moneda.currency.trim() || !moneda.currency_symbol.trim()) {
+      toast.error('La moneda y símbolo son obligatorios'); return
+    }
+    setSavingMoneda(true)
+    const { error } = await service.saveSettings({
+      currency:        moneda.currency,
+      currency_symbol: moneda.currency_symbol,
+    })
+    if (error) toast.error('Error al guardar: ' + error.message)
+    else       toast.success('✅ Moneda guardada correctamente')
+    setSavingMoneda(false)
+  }
+
+  // ── Validación cruzada RFC ────────────────────────────────
+  // El RFC del CSD debe coincidir con el RFC fiscal de la empresa.
+  // La e.firma es del representante legal (RFC persona física) —
+  // ese RFC es distinto al de la empresa, no se valida cruzado.
+  const rfcCsdCoincide = (rfcCert) => {
+    if (!datosFiscales.rfc || !rfcCert) return true
+    return rfcCert.toUpperCase() === datosFiscales.rfc.toUpperCase()
+  }
+
+  // ─── CSD ──────────────────────────────────────────────────
   const validarCSD = async () => {
-    if (!csd.cer || !csd.key)     { toast.error('Debes cargar el .cer y el .key del CSD'); return }
-    if (!csd.password.trim())     { toast.error('La contraseña del CSD es obligatoria');   return }
+    if (!csd.cer || !csd.key) { toast.error('Debes cargar el .cer y el .key del CSD'); return }
+    if (!csd.password.trim()) { toast.error('La contraseña del CSD es obligatoria');   return }
     mutarCsd('validando', true)
     try {
       const cerB64 = await toBase64(csd.cer)
@@ -472,6 +647,11 @@ export const CompanySettings = () => {
       })
       if (error || !result?.valido) {
         toast.error(result?.mensaje || 'Par CSD inválido. Verifica los archivos y la contraseña.')
+        return
+      }
+      // Validación cruzada: RFC del CSD debe coincidir con RFC de la empresa
+      if (!rfcCsdCoincide(result.rfc)) {
+        toast.error(`⚠️ El RFC del CSD (${result.rfc}) no coincide con el RFC de la empresa (${datosFiscales.rfc}). Verifica que estés usando el CSD correcto.`)
         return
       }
       setCsd(s => ({
@@ -527,12 +707,10 @@ export const CompanySettings = () => {
     }
   }
 
-  // ─────────────────────────────────────────────────────────────────────────
-  // e.firma
-  // ─────────────────────────────────────────────────────────────────────────
+  // ─── e.firma ──────────────────────────────────────────────
   const validarEfirma = async () => {
-    if (!efirma.cer || !efirma.key)  { toast.error('Debes cargar el .cer y el .key de la e.firma'); return }
-    if (!efirma.password.trim())     { toast.error('La contraseña de la e.firma es obligatoria');   return }
+    if (!efirma.cer || !efirma.key) { toast.error('Debes cargar el .cer y el .key de la e.firma'); return }
+    if (!efirma.password.trim())    { toast.error('La contraseña de la e.firma es obligatoria');   return }
     mutarEfirma('validando', true)
     try {
       const cerB64 = await toBase64(efirma.cer)
@@ -546,12 +724,20 @@ export const CompanySettings = () => {
       }
       setEfirma(s => ({
         ...s,
-        rfcPreview: result.rfc, nombrePreview: result.nombre,
+        rfcPreview:      result.rfc,
+        nombrePreview:   result.nombre,
         vigenciaPreview: result.vigencia,
-        cerB64Preview: cerB64, keyB64Preview: keyB64,
-        validado: true,
+        cerB64Preview:   cerB64,
+        keyB64Preview:   keyB64,
+        nombreManual:    '',
+        validado:        true,
       }))
-      toast.success(`✅ e.firma válida — RFC: ${result.rfc}`)
+      // Conservado de v1.1: aviso diferenciado si nombre no se detectó
+      if (!result.nombre || result.nombre === 'No detectado') {
+        toast.warning('⚠️ Nombre del titular no detectado — captúralo manualmente antes de guardar.')
+      } else {
+        toast.success(`✅ e.firma válida — RFC: ${result.rfc}`)
+      }
     } catch (e) {
       toast.error('Error al validar e.firma: ' + e.message)
     } finally {
@@ -561,17 +747,42 @@ export const CompanySettings = () => {
 
   const guardarEfirma = async () => {
     if (!efirma.validado) { toast.error('Primero valida la e.firma'); return }
+
+    const nombreFinal = (
+      !efirma.nombrePreview || efirma.nombrePreview === 'No detectado'
+    )
+      ? efirma.nombreManual?.trim()
+      : efirma.nombrePreview
+
+    // Conservado de v1.1: mensaje de error detallado
+    if (!nombreFinal || nombreFinal.length < 3) {
+      toast.error('El nombre del titular de la e.firma es obligatorio. Captúralo en el campo amarillo.')
+      return
+    }
+
     mutarEfirma('guardando', true)
     try {
       const cid = await getCompanyId()
       const { error } = await supabase.from('company_efirma').upsert({
-        company_id: cid, cer_base64: efirma.cerB64Preview, key_base64: efirma.keyB64Preview,
-        password_hint: efirma.password, rfc: efirma.rfcPreview,
-        nombre_titular: efirma.nombrePreview, vigencia: efirma.vigenciaPreview,
-        configurada: true, updated_at: new Date().toISOString(),
+        company_id:     cid,
+        cer_base64:     efirma.cerB64Preview,
+        key_base64:     efirma.keyB64Preview,
+        password_hint:  efirma.password,
+        rfc:            efirma.rfcPreview,
+        nombre_titular: nombreFinal,
+        vigencia:       efirma.vigenciaPreview,
+        configurada:    true,
+        updated_at:     new Date().toISOString(),
       }, { onConflict: 'company_id' })
       if (error) throw error
-      setEfirma({ ...firmaInicial(), configurada: true, rfc: efirma.rfcPreview, nombre: efirma.nombrePreview, vigencia: efirma.vigenciaPreview, updatedAt: new Date().toISOString() })
+      setEfirma({
+        ...firmaInicial(),
+        configurada: true,
+        rfc:         efirma.rfcPreview,
+        nombre:      nombreFinal,
+        vigencia:    efirma.vigenciaPreview,
+        updatedAt:   new Date().toISOString(),
+      })
       toast.success('🔐 e.firma guardada correctamente')
     } catch (e) {
       toast.error('Error al guardar e.firma: ' + e.message)
@@ -597,15 +808,7 @@ export const CompanySettings = () => {
     }
   }
 
-  // Vista previa costos
-  const examplePurchase  = 1000
-  const mgmtCostPct      = parseFloat(settings.default_management_cost)  / 100 || 0
-  const inflationPct     = parseFloat(settings.default_inflation_factor) / 100 || 0
-  const exampleSalePrice = examplePurchase * (1 + mgmtCostPct + inflationPct)
-  const exampleMargin    = exampleSalePrice - examplePurchase
-  const exampleMarginPct = ((exampleMargin / examplePurchase) * 100).toFixed(2)
-
-  // ── Loading ────────────────────────────────────────────────────────────────
+  // ── Loading ────────────────────────────────────────────────
   if (loading) {
     return (
       <MainLayout title="⚙️ Configuración de Empresa">
@@ -616,18 +819,18 @@ export const CompanySettings = () => {
     )
   }
 
-  // ── Render ─────────────────────────────────────────────────────────────────
+  // ── Render ─────────────────────────────────────────────────
   return (
     <RequirePermission module="settings" action="edit">
       <MainLayout title="⚙️ Configuración de Empresa">
-        <div style={{ maxWidth: '720px', margin: '0 auto' }}>
+        <div style={{ maxWidth: '760px', margin: '0 auto' }}>
 
           {/* Empresa actual */}
           {companyName && (
             <div style={{
               display: 'flex', alignItems: 'center', gap: '10px',
               backgroundColor: '#eff6ff', border: '1px solid #bfdbfe',
-              borderRadius: '12px', padding: '12px 16px', marginBottom: '24px',
+              borderRadius: '12px', padding: '12px 16px', marginBottom: '20px',
             }}>
               <Building2 size={18} color="#2563eb" />
               <div>
@@ -637,312 +840,449 @@ export const CompanySettings = () => {
             </div>
           )}
 
-          {/* ══════════════════════════════════════════════════════════════════
-              Sección 1 — Niveles de Aprobación
-          ══════════════════════════════════════════════════════════════════ */}
-          <Section icon={Shield} title="Niveles de Aprobación" subtitle="Define quién aprueba las solicitudes de materiales según el monto">
-            <Field label="Límite para aprobación de Jefe de Obra" hint="Solicitudes hasta este monto las aprueba el Jefe de Obra. Las mayores requieren Admin Empresa.">
-              <div style={{ display: 'flex', alignItems: 'center' }}>
-                <span style={{ padding: '10px 12px', backgroundColor: '#f3f4f6', border: '1px solid #e5e7eb', borderRight: 'none', borderRadius: '8px 0 0 8px', fontSize: '14px', color: '#6b7280', fontWeight: '600' }}>
-                  {settings.currency_symbol}
-                </span>
-                <input
-                  type="number" min="1" step="100"
-                  value={settings.approval_limit_jefe_obra}
-                  onChange={e => set('approval_limit_jefe_obra', e.target.value)}
-                  style={{ flex: 1, padding: '10px 12px', border: '1px solid #e5e7eb', borderRadius: '0 8px 8px 0', fontSize: '14px', fontWeight: '600', outline: 'none', color: '#111827' }}
-                />
-              </div>
-            </Field>
-            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '12px', marginTop: '4px' }}>
-              <div style={{ backgroundColor: '#f0fdf4', border: '1px solid #bbf7d0', borderRadius: '10px', padding: '14px' }}>
-                <p style={{ fontSize: '11px', fontWeight: '600', color: '#166534', textTransform: 'uppercase', margin: '0 0 4px' }}>👷 Jefe de Obra aprueba</p>
-                <p style={{ fontSize: '16px', fontWeight: '700', color: '#15803d', margin: 0 }}>Hasta {settings.currency_symbol}{Number(settings.approval_limit_jefe_obra).toLocaleString('es-MX')}</p>
-              </div>
-              <div style={{ backgroundColor: '#eff6ff', border: '1px solid #bfdbfe', borderRadius: '10px', padding: '14px' }}>
-                <p style={{ fontSize: '11px', fontWeight: '600', color: '#1e40af', textTransform: 'uppercase', margin: '0 0 4px' }}>🏢 Admin Empresa aprueba</p>
-                <p style={{ fontSize: '16px', fontWeight: '700', color: '#1d4ed8', margin: 0 }}>Más de {settings.currency_symbol}{Number(settings.approval_limit_jefe_obra).toLocaleString('es-MX')}</p>
-              </div>
-            </div>
-          </Section>
-
-          {/* ══════════════════════════════════════════════════════════════════
-              Sección 2 — Moneda
-          ══════════════════════════════════════════════════════════════════ */}
-          <Section icon={DollarSign} title="Moneda" subtitle="Configuración de moneda para precios y reportes">
-            <div style={{ display: 'grid', gridTemplateColumns: '1fr 120px', gap: '16px' }}>
-              <Field label="Código de moneda">
-                <select
-                  value={settings.currency}
-                  onChange={e => {
-                    const symbols = { MXN: '$', USD: 'USD$', EUR: '€' }
-                    set('currency', e.target.value)
-                    set('currency_symbol', symbols[e.target.value] || '$')
-                  }}
-                  style={{ width: '100%', padding: '10px 12px', border: '1px solid #e5e7eb', borderRadius: '8px', fontSize: '14px', outline: 'none', backgroundColor: '#fff' }}
-                >
-                  <option value="MXN">MXN — Peso Mexicano</option>
-                  <option value="USD">USD — Dólar Americano</option>
-                  <option value="EUR">EUR — Euro</option>
-                </select>
-              </Field>
-              <Field label="Símbolo">
-                <input type="text" maxLength={5} value={settings.currency_symbol} onChange={e => set('currency_symbol', e.target.value)}
-                  style={{ width: '100%', padding: '10px 12px', border: '1px solid #e5e7eb', borderRadius: '8px', fontSize: '16px', fontWeight: '700', outline: 'none', textAlign: 'center', boxSizing: 'border-box' }} />
-              </Field>
-            </div>
-          </Section>
-
-          {/* ══════════════════════════════════════════════════════════════════
-              Sección 3 — Costos por defecto
-          ══════════════════════════════════════════════════════════════════ */}
-          <Section icon={TrendingUp} title="Factores de Costo por Defecto" subtitle="Se aplican a materiales sin precio específico configurado">
-            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '16px' }}>
-              <Field label="Costo de Gestión %" hint="Porcentaje adicional por flete, maniobras y almacenaje">
-                <div style={{ display: 'flex', alignItems: 'center' }}>
-                  <input type="number" min="0" max="100" step="0.1" value={settings.default_management_cost} onChange={e => set('default_management_cost', e.target.value)}
-                    style={{ flex: 1, padding: '10px 12px', border: '1px solid #e5e7eb', borderRadius: '8px 0 0 8px', fontSize: '14px', fontWeight: '600', outline: 'none' }} />
-                  <span style={{ padding: '10px 12px', backgroundColor: '#f3f4f6', border: '1px solid #e5e7eb', borderLeft: 'none', borderRadius: '0 8px 8px 0', fontSize: '14px', color: '#6b7280' }}>%</span>
-                </div>
-              </Field>
-              <Field label="Factor Inflacionario %" hint="Porcentaje de ajuste por inflación o indexación de precios">
-                <div style={{ display: 'flex', alignItems: 'center' }}>
-                  <input type="number" min="0" max="100" step="0.1" value={settings.default_inflation_factor} onChange={e => set('default_inflation_factor', e.target.value)}
-                    style={{ flex: 1, padding: '10px 12px', border: '1px solid #e5e7eb', borderRadius: '8px 0 0 8px', fontSize: '14px', fontWeight: '600', outline: 'none' }} />
-                  <span style={{ padding: '10px 12px', backgroundColor: '#f3f4f6', border: '1px solid #e5e7eb', borderLeft: 'none', borderRadius: '0 8px 8px 0', fontSize: '14px', color: '#6b7280' }}>%</span>
-                </div>
-              </Field>
-            </div>
-            {(mgmtCostPct > 0 || inflationPct > 0) && (
-              <div style={{ backgroundColor: '#fafafa', border: '1px solid #e5e7eb', borderRadius: '10px', padding: '14px', marginTop: '8px' }}>
-                <p style={{ fontSize: '12px', fontWeight: '600', color: '#6b7280', margin: '0 0 10px', textTransform: 'uppercase' }}>📊 Vista previa — Material con precio de compra {settings.currency_symbol}1,000</p>
-                <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: '8px' }}>
-                  {[
-                    { label: 'Precio Compra', value: `${settings.currency_symbol}${examplePurchase.toFixed(2)}`,                    color: '#374151' },
-                    { label: 'Costo Gestión', value: `+ ${settings.currency_symbol}${(examplePurchase * mgmtCostPct).toFixed(2)}`, color: '#d97706' },
-                    { label: 'Inflación',      value: `+ ${settings.currency_symbol}${(examplePurchase * inflationPct).toFixed(2)}`,color: '#7c3aed' },
-                    { label: 'Precio a Obra', value: `${settings.currency_symbol}${exampleSalePrice.toFixed(2)}`,                  color: '#059669' },
-                  ].map(item => (
-                    <div key={item.label} style={{ textAlign: 'center' }}>
-                      <p style={{ fontSize: '11px', color: '#9ca3af', margin: '0 0 4px' }}>{item.label}</p>
-                      <p style={{ fontSize: '14px', fontWeight: '700', color: item.color, margin: 0 }}>{item.value}</p>
-                    </div>
-                  ))}
-                </div>
-                <div style={{ textAlign: 'center', marginTop: '10px', paddingTop: '10px', borderTop: '1px solid #e5e7eb' }}>
-                  <span style={{ fontSize: '12px', color: '#059669', fontWeight: '600' }}>Margen total: {settings.currency_symbol}{exampleMargin.toFixed(2)} ({exampleMarginPct}%)</span>
-                </div>
-              </div>
-            )}
-          </Section>
-
-          {/* ══════════════════════════════════════════════════════════════════
-              Sección 4 — CSD
-          ══════════════════════════════════════════════════════════════════ */}
-          <Section icon={FileKey2} title="CSD — Certificado de Sello Digital" subtitle="Requerido para firmar y timbrar CFDIs ante el PAC" accentColor="#7c3aed">
-
-            {/* Modal de confirmación eliminar CSD */}
-            {csd.confirmarEliminar && (
-              <ModalEliminar
-                tipo="csd"
-                eliminando={csd.eliminando}
-                onCancelar={() => mutarCsd('confirmarEliminar', false)}
-                onAceptar={eliminarCSD}
-              />
-            )}
-
-            {/* Estado: configurado */}
-            {csd.configurada && !csd.modoRenovar && !csd.confirmarEliminar && (
-              <>
-                <div style={{ backgroundColor: '#f0fdf4', border: '1px solid #bbf7d0', borderRadius: '12px', padding: '16px' }}>
-                  <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', gap: '12px' }}>
-                    {/* Info */}
-                    <div style={{ display: 'flex', alignItems: 'flex-start', gap: '10px' }}>
-                      <CheckCircle2 size={18} color="#16a34a" style={{ flexShrink: 0, marginTop: '2px' }} />
-                      <div>
-                        <p style={{ fontSize: '13px', fontWeight: '700', color: '#15803d', margin: '0 0 8px' }}>CSD configurado correctamente</p>
-                        <div style={{ display: 'grid', gridTemplateColumns: 'auto 1fr', rowGap: '4px', columnGap: '16px' }}>
-                          {[
-                            ['RFC',        csd.rfc],
-                            ['Titular',    csd.nombre],
-                            ['Vigencia',   csd.vigencia ? new Date(csd.vigencia).toLocaleDateString('es-MX', { day: '2-digit', month: 'long', year: 'numeric' }) : null],
-                            ['No. Cert.',  csd.noCertificado],
-                          ].filter(([, v]) => v).map(([k, v]) => (
-                            <div key={k} style={{ display: 'contents' }}>
-                              <span style={{ fontSize: '12px', color: '#4b7c59', fontWeight: '600' }}>{k}</span>
-                              <span style={{ fontSize: '12px', color: '#166534' }}>{v}</span>
-                            </div>
-                          ))}
-                        </div>
-                        {csd.updatedAt && <p style={{ fontSize: '11px', color: '#9ca3af', margin: '8px 0 0' }}>Actualizado: {new Date(csd.updatedAt).toLocaleDateString('es-MX')}</p>}
-                      </div>
-                    </div>
-                    {/* Acciones */}
-                    <div style={{ display: 'flex', flexDirection: 'column', gap: '8px', flexShrink: 0 }}>
-                      <button
-                        onClick={() => mutarCsd('modoRenovar', true)}
-                        style={{ display: 'flex', alignItems: 'center', gap: '6px', padding: '7px 14px', borderRadius: '8px', border: '1px solid #ddd6fe', backgroundColor: '#f5f3ff', color: '#6d28d9', cursor: 'pointer', fontSize: '12px', fontWeight: '600', whiteSpace: 'nowrap' }}
-                      >
-                        <RotateCcw size={13} /> Renovar
-                      </button>
-                      <button
-                        onClick={() => mutarCsd('confirmarEliminar', true)}
-                        style={{ display: 'flex', alignItems: 'center', gap: '6px', padding: '7px 14px', borderRadius: '8px', border: '1px solid #fca5a5', backgroundColor: '#fef2f2', color: '#dc2626', cursor: 'pointer', fontSize: '12px', fontWeight: '600', whiteSpace: 'nowrap' }}
-                      >
-                        <Trash2 size={13} /> Eliminar
-                      </button>
-                    </div>
-                  </div>
-                </div>
-                <AlertaVigencia vigencia={csd.vigencia} />
-              </>
-            )}
-
-            {/* Estado: sin configurar */}
-            {!csd.configurada && !csd.modoRenovar && !csd.confirmarEliminar && (
-              <div style={{ display: 'flex', alignItems: 'center', gap: '10px', backgroundColor: '#fffbeb', border: '1px solid #fde68a', borderRadius: '10px', padding: '12px 14px', marginBottom: '16px' }}>
-                <AlertTriangle size={16} color="#d97706" />
-                <p style={{ fontSize: '13px', color: '#92400e', margin: 0 }}>Sin CSD configurado — no podrás generar ni timbrar facturas en el sistema.</p>
-              </div>
-            )}
-
-            {/* Encabezado modo renovar */}
-            {csd.modoRenovar && (
-              <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', backgroundColor: '#f5f3ff', border: '1px solid #ddd6fe', borderRadius: '10px', padding: '10px 14px', marginBottom: '16px' }}>
-                <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-                  <RotateCcw size={15} color="#7c3aed" />
-                  <span style={{ fontSize: '13px', fontWeight: '600', color: '#6d28d9' }}>Renovando CSD — carga los nuevos archivos</span>
-                </div>
-                <button onClick={() => cancelarRenovar(setCsd)} style={{ display: 'flex', alignItems: 'center', gap: '5px', background: 'none', border: 'none', cursor: 'pointer', fontSize: '12px', color: '#7c3aed', fontWeight: '600', padding: '4px' }}>
-                  <X size={14} /> Cancelar
+          {/* ── Pestañas ── */}
+          <div style={{
+            display: 'flex', gap: '4px', marginBottom: '24px',
+            backgroundColor: '#f3f4f6', padding: '4px', borderRadius: '12px',
+          }}>
+            {[
+              { id: 'general',  label: 'Configuración General', Icon: Building2 },
+              { id: 'formatos', label: 'Formatos PDF',          Icon: FileText  },
+            ].map(({ id, label, Icon }) => {
+              const activa = tabActiva === id
+              return (
+                <button key={id} onClick={() => setTabActiva(id)}
+                  style={{
+                    flex: 1, display: 'flex', alignItems: 'center',
+                    justifyContent: 'center', gap: '8px',
+                    padding: '10px 16px', borderRadius: '9px', border: 'none',
+                    backgroundColor: activa ? '#fff' : 'transparent',
+                    color: activa ? '#1d4ed8' : '#6b7280',
+                    cursor: 'pointer', fontSize: '13px',
+                    fontWeight: activa ? '700' : '500',
+                    boxShadow: activa ? '0 1px 4px rgba(0,0,0,0.08)' : 'none',
+                    transition: 'all 0.15s',
+                  }}>
+                  <Icon size={15} />{label}
                 </button>
-              </div>
-            )}
-
-            {/* Área de carga */}
-            {(!csd.configurada || csd.modoRenovar) && !csd.confirmarEliminar && (
-              <AreaCarga
-                estado={csd} color="#7c3aed" colorBg="#f5f3ff"
-                onCambiar={mutarCsd} onValidar={validarCSD} onGuardar={guardarCSD}
-                labelGuardar="Guardar CSD"
-                labelPass="Contraseña del CSD (.key)"
-              />
-            )}
-          </Section>
-
-          {/* ══════════════════════════════════════════════════════════════════
-              Sección 5 — e.firma
-          ══════════════════════════════════════════════════════════════════ */}
-          <Section icon={ShieldCheck} title="e.firma — Antes FIEL" subtitle="Requerida para autenticarse ante el SAT en el Buzón Fiscal" accentColor="#2563eb">
-
-            {/* Modal de confirmación eliminar e.firma */}
-            {efirma.confirmarEliminar && (
-              <ModalEliminar
-                tipo="efirma"
-                eliminando={efirma.eliminando}
-                onCancelar={() => mutarEfirma('confirmarEliminar', false)}
-                onAceptar={eliminarEfirma}
-              />
-            )}
-
-            {/* Estado: configurada */}
-            {efirma.configurada && !efirma.modoRenovar && !efirma.confirmarEliminar && (
-              <>
-                <div style={{ backgroundColor: '#f0fdf4', border: '1px solid #bbf7d0', borderRadius: '12px', padding: '16px' }}>
-                  <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', gap: '12px' }}>
-                    {/* Info */}
-                    <div style={{ display: 'flex', alignItems: 'flex-start', gap: '10px' }}>
-                      <CheckCircle2 size={18} color="#16a34a" style={{ flexShrink: 0, marginTop: '2px' }} />
-                      <div>
-                        <p style={{ fontSize: '13px', fontWeight: '700', color: '#15803d', margin: '0 0 8px' }}>e.firma configurada correctamente</p>
-                        <div style={{ display: 'grid', gridTemplateColumns: 'auto 1fr', rowGap: '4px', columnGap: '16px' }}>
-                          {[
-                            ['RFC',      efirma.rfc],
-                            ['Titular',  efirma.nombre],
-                            ['Vigencia', efirma.vigencia ? new Date(efirma.vigencia).toLocaleDateString('es-MX', { day: '2-digit', month: 'long', year: 'numeric' }) : null],
-                          ].filter(([, v]) => v).map(([k, v]) => (
-                            <div key={k} style={{ display: 'contents' }}>
-                              <span style={{ fontSize: '12px', color: '#4b7c59', fontWeight: '600' }}>{k}</span>
-                              <span style={{ fontSize: '12px', color: '#166534' }}>{v}</span>
-                            </div>
-                          ))}
-                        </div>
-                        {efirma.updatedAt && <p style={{ fontSize: '11px', color: '#9ca3af', margin: '8px 0 0' }}>Actualizado: {new Date(efirma.updatedAt).toLocaleDateString('es-MX')}</p>}
-                      </div>
-                    </div>
-                    {/* Acciones */}
-                    <div style={{ display: 'flex', flexDirection: 'column', gap: '8px', flexShrink: 0 }}>
-                      <button
-                        onClick={() => mutarEfirma('modoRenovar', true)}
-                        style={{ display: 'flex', alignItems: 'center', gap: '6px', padding: '7px 14px', borderRadius: '8px', border: '1px solid #bfdbfe', backgroundColor: '#eff6ff', color: '#1d4ed8', cursor: 'pointer', fontSize: '12px', fontWeight: '600', whiteSpace: 'nowrap' }}
-                      >
-                        <RotateCcw size={13} /> Renovar
-                      </button>
-                      <button
-                        onClick={() => mutarEfirma('confirmarEliminar', true)}
-                        style={{ display: 'flex', alignItems: 'center', gap: '6px', padding: '7px 14px', borderRadius: '8px', border: '1px solid #fca5a5', backgroundColor: '#fef2f2', color: '#dc2626', cursor: 'pointer', fontSize: '12px', fontWeight: '600', whiteSpace: 'nowrap' }}
-                      >
-                        <Trash2 size={13} /> Eliminar
-                      </button>
-                    </div>
-                  </div>
-                </div>
-                <AlertaVigencia vigencia={efirma.vigencia} />
-              </>
-            )}
-
-            {/* Estado: sin configurar */}
-            {!efirma.configurada && !efirma.modoRenovar && !efirma.confirmarEliminar && (
-              <div style={{ display: 'flex', alignItems: 'center', gap: '10px', backgroundColor: '#fffbeb', border: '1px solid #fde68a', borderRadius: '10px', padding: '12px 14px', marginBottom: '16px' }}>
-                <AlertTriangle size={16} color="#d97706" />
-                <p style={{ fontSize: '13px', color: '#92400e', margin: 0 }}>Sin e.firma configurada — el Buzón Fiscal SAT no podrá descargar CFDIs.</p>
-              </div>
-            )}
-
-            {/* Encabezado modo renovar */}
-            {efirma.modoRenovar && (
-              <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', backgroundColor: '#eff6ff', border: '1px solid #bfdbfe', borderRadius: '10px', padding: '10px 14px', marginBottom: '16px' }}>
-                <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-                  <RotateCcw size={15} color="#2563eb" />
-                  <span style={{ fontSize: '13px', fontWeight: '600', color: '#1d4ed8' }}>Renovando e.firma — carga los nuevos archivos</span>
-                </div>
-                <button onClick={() => cancelarRenovar(setEfirma)} style={{ display: 'flex', alignItems: 'center', gap: '5px', background: 'none', border: 'none', cursor: 'pointer', fontSize: '12px', color: '#2563eb', fontWeight: '600', padding: '4px' }}>
-                  <X size={14} /> Cancelar
-                </button>
-              </div>
-            )}
-
-            {/* Área de carga */}
-            {(!efirma.configurada || efirma.modoRenovar) && !efirma.confirmarEliminar && (
-              <AreaCarga
-                estado={efirma} color="#2563eb" colorBg="#eff6ff"
-                onCambiar={mutarEfirma} onValidar={validarEfirma} onGuardar={guardarEfirma}
-                labelGuardar="Guardar e.firma"
-                labelPass="Contraseña de la e.firma (.key)"
-              />
-            )}
-          </Section>
-
-          {/* ══════════════════════════════════════════════════════════════════
-              Botones — Guardar configuración general
-          ══════════════════════════════════════════════════════════════════ */}
-          <div style={{ display: 'flex', gap: '12px', justifyContent: 'flex-end' }}>
-            <button
-              onClick={cargarTodo}
-              disabled={loading || saving}
-              style={{ display: 'flex', alignItems: 'center', gap: '8px', padding: '10px 20px', borderRadius: '10px', border: '1px solid #e5e7eb', backgroundColor: '#fff', cursor: 'pointer', fontSize: '14px', color: '#374151' }}
-            >
-              <RefreshCw size={15} /> Restablecer
-            </button>
-            <button
-              onClick={handleSaveGeneral}
-              disabled={saving}
-              style={{ display: 'flex', alignItems: 'center', gap: '8px', padding: '10px 24px', borderRadius: '10px', border: 'none', backgroundColor: saving ? '#93c5fd' : '#2563eb', color: '#fff', cursor: saving ? 'not-allowed' : 'pointer', fontSize: '14px', fontWeight: '600', transition: 'background-color 0.2s' }}
-            >
-              <Save size={15} />
-              {saving ? 'Guardando...' : 'Guardar Configuración'}
-            </button>
+              )
+            })}
           </div>
+
+          {/* ══════════════════════════════════════════════════
+              TAB: CONFIGURACIÓN GENERAL
+          ══════════════════════════════════════════════════ */}
+          {tabActiva === 'general' && (
+            <>
+              {/* ── 1. Datos Fiscales ── */}
+              <Section
+                icon={Receipt}
+                title="Datos Fiscales de la Empresa"
+                subtitle="Requeridos para el Buzón Fiscal SAT y la emisión de CFDIs"
+                accentColor="#059669"
+                badge={
+                  <BadgeCompleto
+                    completo={datosFiscalesCompletos}
+                    texto={datosFiscalesCompletos ? 'Completo' : 'Requerido'}
+                  />
+                }
+              >
+                {!datosFiscalesCompletos && (
+                  <div style={{
+                    display: 'flex', alignItems: 'flex-start', gap: '10px',
+                    backgroundColor: '#fef3c7', border: '1px solid #fde68a',
+                    borderRadius: '10px', padding: '12px 14px', marginBottom: '16px',
+                  }}>
+                    <AlertTriangle size={16} color="#d97706" style={{ flexShrink: 0, marginTop: '1px' }} />
+                    <p style={{ fontSize: '13px', color: '#92400e', margin: 0, lineHeight: '1.5' }}>
+                      <strong>Datos incompletos.</strong> El Buzón Fiscal SAT y la Facturación
+                      no funcionarán correctamente hasta que captures y guardes el RFC real,
+                      la razón social, el régimen fiscal y el código postal de la empresa.
+                    </p>
+                  </div>
+                )}
+
+                <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '12px' }}>
+                  <Field label="RFC de la empresa" required hint="RFC fiscal de la empresa (persona moral o física)">
+                    <input
+                      type="text" placeholder="Ej: ABC123456XY1"
+                      value={datosFiscales.rfc} maxLength={13}
+                      onChange={e => setDF('rfc', e.target.value.toUpperCase())}
+                      style={{
+                        width: '100%', padding: '10px 12px', boxSizing: 'border-box',
+                        border: `1px solid ${datosFiscales.rfc && !validarRFC(datosFiscales.rfc) ? '#fca5a5' : '#e5e7eb'}`,
+                        borderRadius: '8px', fontSize: '14px', fontWeight: '600',
+                        fontFamily: 'monospace', outline: 'none',
+                        backgroundColor: datosFiscales.rfc && !validarRFC(datosFiscales.rfc) ? '#fef2f2' : '#fff',
+                      }}
+                    />
+                    {datosFiscales.rfc && !validarRFC(datosFiscales.rfc) && (
+                      <p style={{ fontSize: '11px', color: '#dc2626', margin: '4px 0 0' }}>
+                        Formato inválido. Ej: XAXX010101000
+                      </p>
+                    )}
+                  </Field>
+
+                  <Field label="Código Postal Fiscal" required hint="CP del domicilio fiscal registrado ante el SAT">
+                    <input
+                      type="text" placeholder="Ej: 44100"
+                      value={datosFiscales.cp_fiscal} maxLength={5}
+                      onChange={e => setDF('cp_fiscal', e.target.value.replace(/\D/g, '').slice(0, 5))}
+                      style={{
+                        width: '100%', padding: '10px 12px', boxSizing: 'border-box',
+                        border: `1px solid ${datosFiscales.cp_fiscal && datosFiscales.cp_fiscal.length !== 5 ? '#fca5a5' : '#e5e7eb'}`,
+                        borderRadius: '8px', fontSize: '14px', fontWeight: '600',
+                        fontFamily: 'monospace', outline: 'none',
+                        backgroundColor: datosFiscales.cp_fiscal && datosFiscales.cp_fiscal.length !== 5 ? '#fef2f2' : '#fff',
+                      }}
+                    />
+                    {datosFiscales.cp_fiscal && datosFiscales.cp_fiscal.length !== 5 && (
+                      <p style={{ fontSize: '11px', color: '#dc2626', margin: '4px 0 0' }}>
+                        Debe tener exactamente 5 dígitos
+                      </p>
+                    )}
+                  </Field>
+                </div>
+
+                <Field label="Razón Social" required hint="Nombre completo registrado ante el SAT — igual a la Constancia de Situación Fiscal">
+                  <input
+                    type="text" placeholder="Ej: CONSTRUCTORA EJEMPLO SA DE CV"
+                    value={datosFiscales.razon_social}
+                    onChange={e => setDF('razon_social', e.target.value.toUpperCase())}
+                    style={{ width: '100%', padding: '10px 12px', border: '1px solid #e5e7eb', borderRadius: '8px', fontSize: '14px', outline: 'none', boxSizing: 'border-box' }}
+                  />
+                </Field>
+
+                <Field label="Régimen Fiscal" required hint="Régimen bajo el que está registrada la empresa ante el SAT">
+                  <select
+                    value={datosFiscales.regimen_fiscal}
+                    onChange={e => setDF('regimen_fiscal', e.target.value)}
+                    style={{ width: '100%', padding: '10px 12px', border: '1px solid #e5e7eb', borderRadius: '8px', fontSize: '13px', outline: 'none', backgroundColor: '#fff', boxSizing: 'border-box' }}
+                  >
+                    {REGIMENES_FISCALES.map(r => (
+                      <option key={r.value} value={r.value}>{r.label}</option>
+                    ))}
+                  </select>
+                </Field>
+
+                <Field label="Domicilio Fiscal" hint="Calle, número, colonia, ciudad, estado">
+                  <input
+                    type="text" placeholder="Ej: Av. Revolución 123, Col. Centro, Guadalajara, Jalisco"
+                    value={datosFiscales.domicilio_fiscal}
+                    onChange={e => setDF('domicilio_fiscal', e.target.value)}
+                    style={{ width: '100%', padding: '10px 12px', border: '1px solid #e5e7eb', borderRadius: '8px', fontSize: '14px', outline: 'none', boxSizing: 'border-box' }}
+                  />
+                </Field>
+
+                <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: '12px' }}>
+                  <Field label="Teléfono" style={{ marginBottom: 0 }}>
+                    <input type="text" placeholder="33-1234-5678" value={datosFiscales.telefono}
+                      onChange={e => setDF('telefono', e.target.value)}
+                      style={{ width: '100%', padding: '10px 12px', border: '1px solid #e5e7eb', borderRadius: '8px', fontSize: '14px', outline: 'none', boxSizing: 'border-box' }} />
+                  </Field>
+                  <Field label="Email" style={{ marginBottom: 0 }}>
+                    <input type="email" placeholder="contacto@empresa.com" value={datosFiscales.email}
+                      onChange={e => setDF('email', e.target.value)}
+                      style={{ width: '100%', padding: '10px 12px', border: '1px solid #e5e7eb', borderRadius: '8px', fontSize: '14px', outline: 'none', boxSizing: 'border-box' }} />
+                  </Field>
+                  <Field label="Sitio Web" style={{ marginBottom: 0 }}>
+                    <input type="text" placeholder="www.empresa.com" value={datosFiscales.web}
+                      onChange={e => setDF('web', e.target.value)}
+                      style={{ width: '100%', padding: '10px 12px', border: '1px solid #e5e7eb', borderRadius: '8px', fontSize: '14px', outline: 'none', boxSizing: 'border-box' }} />
+                  </Field>
+                </div>
+
+                <div style={{ display: 'flex', justifyContent: 'flex-end', marginTop: '16px' }}>
+                  <button onClick={handleSaveDatosFiscales} disabled={savingFiscal}
+                    style={{
+                      display: 'flex', alignItems: 'center', gap: '8px',
+                      padding: '10px 24px', borderRadius: '10px', border: 'none',
+                      backgroundColor: savingFiscal ? '#6ee7b7' : '#059669',
+                      color: '#fff', cursor: savingFiscal ? 'not-allowed' : 'pointer',
+                      fontSize: '13px', fontWeight: '700', transition: 'background-color 0.2s',
+                    }}>
+                    <Save size={14} />
+                    {savingFiscal ? 'Guardando...' : 'Guardar Datos Fiscales'}
+                  </button>
+                </div>
+              </Section>
+
+              {/* ── 2. Logotipos ── */}
+              <Section
+                icon={ImageIcon}
+                title="Logotipos de la Empresa"
+                subtitle="Logo Sistema (Login/Sidebar), Logo Documentos (PDFs) y Logo Alternativo"
+                accentColor="#0891b2"
+              >
+                <LogotiposSection />
+              </Section>
+
+              {/* ── 3. e.firma ── */}
+              <Section
+                icon={ShieldCheck}
+                title="e.firma — Antes FIEL"
+                subtitle="Del representante legal — requerida para autenticarse ante el SAT en el Buzón Fiscal"
+                accentColor="#2563eb"
+                badge={
+                  <BadgeCompleto
+                    completo={efirma.configurada && efirma.nombre && efirma.nombre !== 'No detectado'}
+                    texto={efirma.configurada ? 'Configurada' : 'Pendiente'}
+                  />
+                }
+              >
+                {efirma.confirmarEliminar && (
+                  <ModalEliminar tipo="efirma" eliminando={efirma.eliminando}
+                    onCancelar={() => mutarEfirma('confirmarEliminar', false)} onAceptar={eliminarEfirma} />
+                )}
+
+                {efirma.configurada && !efirma.modoRenovar && !efirma.confirmarEliminar && (
+                  <>
+                    <div style={{ backgroundColor: '#f0fdf4', border: '1px solid #bbf7d0', borderRadius: '12px', padding: '16px' }}>
+                      <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', gap: '12px' }}>
+                        <div style={{ display: 'flex', alignItems: 'flex-start', gap: '10px' }}>
+                          <CheckCircle2 size={18} color="#16a34a" style={{ flexShrink: 0, marginTop: '2px' }} />
+                          <div>
+                            <p style={{ fontSize: '13px', fontWeight: '700', color: '#15803d', margin: '0 0 8px' }}>e.firma configurada correctamente</p>
+                            <div style={{ display: 'grid', gridTemplateColumns: 'auto 1fr', rowGap: '4px', columnGap: '16px' }}>
+                              {[
+                                ['RFC',      efirma.rfc],
+                                ['Titular',  efirma.nombre],
+                                ['Vigencia', efirma.vigencia ? new Date(efirma.vigencia).toLocaleDateString('es-MX', { day: '2-digit', month: 'long', year: 'numeric' }) : null],
+                              ].filter(([, v]) => v).map(([k, v]) => (
+                                <div key={k} style={{ display: 'contents' }}>
+                                  <span style={{ fontSize: '12px', color: '#4b7c59', fontWeight: '600' }}>{k}</span>
+                                  <span style={{
+                                    fontSize: '12px',
+                                    color: v === 'No detectado' ? '#d97706' : '#166534',
+                                    fontWeight: v === 'No detectado' ? '700' : 'normal',
+                                  }}>{v}</span>
+                                </div>
+                              ))}
+                            </div>
+                            {(!efirma.nombre || efirma.nombre === 'No detectado') && (
+                              <div style={{ marginTop: '10px', display: 'flex', alignItems: 'center', gap: '6px', color: '#d97706' }}>
+                                <AlertTriangle size={13} />
+                                <span style={{ fontSize: '12px', fontWeight: '600' }}>
+                                  Nombre no registrado — usa "Renovar" para capturarlo.
+                                </span>
+                              </div>
+                            )}
+                            {efirma.updatedAt && (
+                              <p style={{ fontSize: '11px', color: '#9ca3af', margin: '8px 0 0' }}>
+                                Actualizado: {new Date(efirma.updatedAt).toLocaleDateString('es-MX')}
+                              </p>
+                            )}
+                          </div>
+                        </div>
+                        <div style={{ display: 'flex', flexDirection: 'column', gap: '8px', flexShrink: 0 }}>
+                          <button onClick={() => mutarEfirma('modoRenovar', true)}
+                            style={{ display: 'flex', alignItems: 'center', gap: '6px', padding: '7px 14px', borderRadius: '8px', border: '1px solid #bfdbfe', backgroundColor: '#eff6ff', color: '#1d4ed8', cursor: 'pointer', fontSize: '12px', fontWeight: '600', whiteSpace: 'nowrap' }}>
+                            <RotateCcw size={13} /> Renovar
+                          </button>
+                          <button onClick={() => mutarEfirma('confirmarEliminar', true)}
+                            style={{ display: 'flex', alignItems: 'center', gap: '6px', padding: '7px 14px', borderRadius: '8px', border: '1px solid #fca5a5', backgroundColor: '#fef2f2', color: '#dc2626', cursor: 'pointer', fontSize: '12px', fontWeight: '600', whiteSpace: 'nowrap' }}>
+                            <Trash2 size={13} /> Eliminar
+                          </button>
+                        </div>
+                      </div>
+                    </div>
+                    <AlertaVigencia vigencia={efirma.vigencia} />
+                  </>
+                )}
+
+                {!efirma.configurada && !efirma.modoRenovar && !efirma.confirmarEliminar && (
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '10px', backgroundColor: '#fffbeb', border: '1px solid #fde68a', borderRadius: '10px', padding: '12px 14px', marginBottom: '16px' }}>
+                    <AlertTriangle size={16} color="#d97706" />
+                    <p style={{ fontSize: '13px', color: '#92400e', margin: 0 }}>Sin e.firma configurada — el Buzón Fiscal SAT no podrá descargar CFDIs.</p>
+                  </div>
+                )}
+
+                {efirma.modoRenovar && (
+                  <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', backgroundColor: '#eff6ff', border: '1px solid #bfdbfe', borderRadius: '10px', padding: '10px 14px', marginBottom: '16px' }}>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                      <RotateCcw size={15} color="#2563eb" />
+                      <span style={{ fontSize: '13px', fontWeight: '600', color: '#1d4ed8' }}>Renovando e.firma — carga los nuevos archivos</span>
+                    </div>
+                    <button onClick={() => cancelarRenovar(setEfirma)}
+                      style={{ display: 'flex', alignItems: 'center', gap: '5px', background: 'none', border: 'none', cursor: 'pointer', fontSize: '12px', color: '#2563eb', fontWeight: '600', padding: '4px' }}>
+                      <X size={14} /> Cancelar
+                    </button>
+                  </div>
+                )}
+
+                {(!efirma.configurada || efirma.modoRenovar) && !efirma.confirmarEliminar && (
+                  <AreaCarga
+                    estado={efirma} color="#2563eb" colorBg="#eff6ff"
+                    onCambiar={mutarEfirma} onValidar={validarEfirma} onGuardar={guardarEfirma}
+                    onLimpiar={() => cancelarRenovar(setEfirma)}
+                    labelGuardar="Guardar e.firma" labelPass="Contraseña de la e.firma (.key)"
+                    mostrarNombreManual={true}
+                  />
+                )}
+              </Section>
+
+              {/* ── 3. CSD ── */}
+              <Section
+                icon={FileKey2}
+                title="CSD — Certificado de Sello Digital"
+                subtitle="De la empresa — requerido para firmar y timbrar CFDIs ante el PAC"
+                accentColor="#7c3aed"
+                badge={<BadgeCompleto completo={csd.configurada} texto={csd.configurada ? 'Configurado' : 'Pendiente'} />}
+              >
+                {csd.confirmarEliminar && (
+                  <ModalEliminar tipo="csd" eliminando={csd.eliminando}
+                    onCancelar={() => mutarCsd('confirmarEliminar', false)} onAceptar={eliminarCSD} />
+                )}
+
+                {/* Aviso si RFC empresa no está configurado aún */}
+                {!datosFiscales.rfc && (
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '10px', backgroundColor: '#fef3c7', border: '1px solid #fde68a', borderRadius: '10px', padding: '12px 14px', marginBottom: '16px' }}>
+                    <AlertTriangle size={16} color="#d97706" />
+                    <p style={{ fontSize: '13px', color: '#92400e', margin: 0 }}>
+                      Primero guarda el RFC en <strong>Datos Fiscales</strong> para poder validar que el CSD pertenece a esta empresa.
+                    </p>
+                  </div>
+                )}
+
+                {csd.configurada && !csd.modoRenovar && !csd.confirmarEliminar && (
+                  <>
+                    <div style={{ backgroundColor: '#f0fdf4', border: '1px solid #bbf7d0', borderRadius: '12px', padding: '16px' }}>
+                      <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', gap: '12px' }}>
+                        <div style={{ display: 'flex', alignItems: 'flex-start', gap: '10px' }}>
+                          <CheckCircle2 size={18} color="#16a34a" style={{ flexShrink: 0, marginTop: '2px' }} />
+                          <div>
+                            <p style={{ fontSize: '13px', fontWeight: '700', color: '#15803d', margin: '0 0 8px' }}>CSD configurado correctamente</p>
+                            <div style={{ display: 'grid', gridTemplateColumns: 'auto 1fr', rowGap: '4px', columnGap: '16px' }}>
+                              {[
+                                ['RFC',       csd.rfc],
+                                ['Titular',   csd.nombre],
+                                ['Vigencia',  csd.vigencia ? new Date(csd.vigencia).toLocaleDateString('es-MX', { day: '2-digit', month: 'long', year: 'numeric' }) : null],
+                                ['No. Cert.', csd.noCertificado],
+                              ].filter(([, v]) => v).map(([k, v]) => (
+                                <div key={k} style={{ display: 'contents' }}>
+                                  <span style={{ fontSize: '12px', color: '#4b7c59', fontWeight: '600' }}>{k}</span>
+                                  <span style={{ fontSize: '12px', color: '#166534' }}>{v}</span>
+                                </div>
+                              ))}
+                            </div>
+                            {csd.updatedAt && (
+                              <p style={{ fontSize: '11px', color: '#9ca3af', margin: '8px 0 0' }}>
+                                Actualizado: {new Date(csd.updatedAt).toLocaleDateString('es-MX')}
+                              </p>
+                            )}
+                          </div>
+                        </div>
+                        <div style={{ display: 'flex', flexDirection: 'column', gap: '8px', flexShrink: 0 }}>
+                          <button onClick={() => mutarCsd('modoRenovar', true)}
+                            style={{ display: 'flex', alignItems: 'center', gap: '6px', padding: '7px 14px', borderRadius: '8px', border: '1px solid #ddd6fe', backgroundColor: '#f5f3ff', color: '#6d28d9', cursor: 'pointer', fontSize: '12px', fontWeight: '600', whiteSpace: 'nowrap' }}>
+                            <RotateCcw size={13} /> Renovar
+                          </button>
+                          <button onClick={() => mutarCsd('confirmarEliminar', true)}
+                            style={{ display: 'flex', alignItems: 'center', gap: '6px', padding: '7px 14px', borderRadius: '8px', border: '1px solid #fca5a5', backgroundColor: '#fef2f2', color: '#dc2626', cursor: 'pointer', fontSize: '12px', fontWeight: '600', whiteSpace: 'nowrap' }}>
+                            <Trash2 size={13} /> Eliminar
+                          </button>
+                        </div>
+                      </div>
+                    </div>
+                    <AlertaVigencia vigencia={csd.vigencia} />
+                  </>
+                )}
+
+                {!csd.configurada && !csd.modoRenovar && !csd.confirmarEliminar && (
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '10px', backgroundColor: '#fffbeb', border: '1px solid #fde68a', borderRadius: '10px', padding: '12px 14px', marginBottom: '16px' }}>
+                    <AlertTriangle size={16} color="#d97706" />
+                    <p style={{ fontSize: '13px', color: '#92400e', margin: 0 }}>Sin CSD configurado — no podrás generar ni timbrar facturas en el sistema.</p>
+                  </div>
+                )}
+
+                {csd.modoRenovar && (
+                  <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', backgroundColor: '#f5f3ff', border: '1px solid #ddd6fe', borderRadius: '10px', padding: '10px 14px', marginBottom: '16px' }}>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                      <RotateCcw size={15} color="#7c3aed" />
+                      <span style={{ fontSize: '13px', fontWeight: '600', color: '#6d28d9' }}>Renovando CSD — carga los nuevos archivos</span>
+                    </div>
+                    <button onClick={() => cancelarRenovar(setCsd)}
+                      style={{ display: 'flex', alignItems: 'center', gap: '5px', background: 'none', border: 'none', cursor: 'pointer', fontSize: '12px', color: '#7c3aed', fontWeight: '600', padding: '4px' }}>
+                      <X size={14} /> Cancelar
+                    </button>
+                  </div>
+                )}
+
+                {(!csd.configurada || csd.modoRenovar) && !csd.confirmarEliminar && (
+                  <AreaCarga
+                    estado={csd} color="#7c3aed" colorBg="#f5f3ff"
+                    onCambiar={mutarCsd} onValidar={validarCSD} onGuardar={guardarCSD}
+                    onLimpiar={() => cancelarRenovar(setCsd)}
+                    labelGuardar="Guardar CSD" labelPass="Contraseña del CSD (.key)"
+                    mostrarNombreManual={false}
+                  />
+                )}
+              </Section>
+
+              {/* ── 4. Moneda ── */}
+              <Section icon={DollarSign} title="Moneda" subtitle="Configuración de moneda para precios y reportes">
+                <div style={{ display: 'grid', gridTemplateColumns: '1fr 120px', gap: '16px' }}>
+                  <Field label="Código de moneda">
+                    <select value={moneda.currency}
+                      onChange={e => {
+                        const symbols = { MXN: '$', USD: 'USD$', EUR: '€' }
+                        setMoneda({ currency: e.target.value, currency_symbol: symbols[e.target.value] || '$' })
+                      }}
+                      style={{ width: '100%', padding: '10px 12px', border: '1px solid #e5e7eb', borderRadius: '8px', fontSize: '14px', outline: 'none', backgroundColor: '#fff' }}>
+                      <option value="MXN">MXN — Peso Mexicano</option>
+                      <option value="USD">USD — Dólar Americano</option>
+                      <option value="EUR">EUR — Euro</option>
+                    </select>
+                  </Field>
+                  <Field label="Símbolo">
+                    <input type="text" maxLength={5} value={moneda.currency_symbol}
+                      onChange={e => setMoneda(m => ({ ...m, currency_symbol: e.target.value }))}
+                      style={{ width: '100%', padding: '10px 12px', border: '1px solid #e5e7eb', borderRadius: '8px', fontSize: '16px', fontWeight: '700', outline: 'none', textAlign: 'center', boxSizing: 'border-box' }} />
+                  </Field>
+                </div>
+                <div style={{ display: 'flex', justifyContent: 'flex-end', marginTop: '12px' }}>
+                  <button onClick={handleSaveMoneda} disabled={savingMoneda}
+                    style={{
+                      display: 'flex', alignItems: 'center', gap: '8px',
+                      padding: '10px 24px', borderRadius: '10px', border: 'none',
+                      backgroundColor: savingMoneda ? '#93c5fd' : '#2563eb',
+                      color: '#fff', cursor: savingMoneda ? 'not-allowed' : 'pointer',
+                      fontSize: '13px', fontWeight: '700', transition: 'background-color 0.2s',
+                    }}>
+                    <Save size={14} />
+                    {savingMoneda ? 'Guardando...' : 'Guardar Moneda'}
+                  </button>
+                </div>
+              </Section>
+
+              {/* Botón Restablecer — conservado de v1.1 */}
+              <div style={{ display: 'flex', justifyContent: 'flex-end', marginBottom: '20px' }}>
+                <button
+                  onClick={cargarTodo}
+                  disabled={loading}
+                  style={{
+                    display: 'flex', alignItems: 'center', gap: '8px',
+                    padding: '10px 20px', borderRadius: '10px',
+                    border: '1px solid #e5e7eb', backgroundColor: '#fff',
+                    cursor: loading ? 'not-allowed' : 'pointer',
+                    fontSize: '13px', color: '#374151',
+                    opacity: loading ? 0.6 : 1,
+                  }}
+                >
+                  <RefreshCw size={15} /> Restablecer
+                </button>
+              </div>
+            </>
+          )}
+
+          {/* ══════════════════════════════════════════════════
+              TAB: FORMATOS PDF
+          ══════════════════════════════════════════════════ */}
+          {tabActiva === 'formatos' && (
+            <div style={{ backgroundColor: '#fff', border: '1px solid #e5e7eb', borderRadius: '16px', padding: '24px' }}>
+              <FormatosTab />
+            </div>
+          )}
 
         </div>
       </MainLayout>

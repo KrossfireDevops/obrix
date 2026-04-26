@@ -1,7 +1,12 @@
 // ============================================================
 //  OBRIX ERP — Servicio: Buzón Fiscal SAT
 //  Archivo: src/services/buzonFiscal.service.js
-//  Versión: 1.0 | Marzo 2026
+//  Versión: 1.1 | Abril 2026
+//  Cambios v1.1:
+//    - getConfigFiscal() ahora lee company_efirma para saber si
+//      la e.firma está configurada (campo efirma_configurada).
+//      Antes buscaba efirma_cer_url en company_settings, que
+//      nunca existe porque la e.firma se guarda como base64.
 // ============================================================
 
 import { supabase } from '../config/supabase';
@@ -77,14 +82,14 @@ export async function getBuzonStats(fechaDesde, fechaHasta) {
     (rows?.data ?? []).reduce((s, r) => s + Number(r.total_mxn ?? r.total ?? 0), 0);
 
   return {
-    total_recibidas:        recibidas.count  ?? 0,
-    total_emitidas:         emitidas.count   ?? 0,
-    total_rep:              rep.count        ?? 0,
-    total_canceladas:       canceladas.count ?? 0,
-    monto_recibidas_mxn:    sumarMonto(recibidas),
-    monto_emitidas_mxn:     sumarMonto(emitidas),
-    cfdi_sin_contabilizar:  sinContabilizar.count ?? 0,
-    cfdi_sin_tercero:       0,  // requiere RPC para calcular eficientemente
+    total_recibidas:       recibidas.count  ?? 0,
+    total_emitidas:        emitidas.count   ?? 0,
+    total_rep:             rep.count        ?? 0,
+    total_canceladas:      canceladas.count ?? 0,
+    monto_recibidas_mxn:   sumarMonto(recibidas),
+    monto_emitidas_mxn:    sumarMonto(emitidas),
+    cfdi_sin_contabilizar: sinContabilizar.count ?? 0,
+    cfdi_sin_tercero:      0,
   };
 }
 
@@ -124,11 +129,11 @@ export async function getCfdis(filtros = {}) {
     .order('fecha_emision', { ascending: false })
     .range((page - 1) * pageSize, page * pageSize - 1);
 
-  if (direccion)         query = query.eq('direccion', direccion);
-  if (tipo_comprobante)  query = query.eq('tipo_comprobante', tipo_comprobante);
+  if (direccion)        query = query.eq('direccion', direccion);
+  if (tipo_comprobante) query = query.eq('tipo_comprobante', tipo_comprobante);
   if (cancelado !== undefined) query = query.eq('cancelado', cancelado);
-  if (fecha_desde)       query = query.gte('fecha_emision', fecha_desde);
-  if (fecha_hasta)       query = query.lte('fecha_emision', fecha_hasta + 'T23:59:59');
+  if (fecha_desde)      query = query.gte('fecha_emision', fecha_desde);
+  if (fecha_hasta)      query = query.lte('fecha_emision', fecha_hasta + 'T23:59:59');
 
   if (rfc) {
     query = query.or(`emisor_rfc.ilike.%${rfc}%,receptor_rfc.ilike.%${rfc}%`);
@@ -189,26 +194,55 @@ export async function getSolicitudesDescarga(limit = 10) {
 
 /**
  * Configuración fiscal de la empresa (RFC, e.firma, sync).
+ *
+ * FIX v1.1: La e.firma NO se guarda como URL en company_settings.
+ * Se guarda como cer_base64 / key_base64 en la tabla company_efirma
+ * con el campo `configurada` indicando si está activa.
+ * Esta función ahora consulta ambas tablas y expone `efirma_configurada`
+ * como bandera unificada para que SyncPanel y BuzonFiscal la usen.
  */
 export async function getConfigFiscal() {
   const companyId = await getCompanyId();
-  const { data, error } = await supabase
+
+  // Query 1: configuración general de la empresa
+  const { data: settings, error: errSettings } = await supabase
     .from('company_settings')
     .select(`
       rfc, razon_social, regimen_fiscal_emisor,
-      efirma_cer_url, efirma_key_url, efirma_vencimiento, efirma_serie,
       sat_sync_activo, sat_ultimo_sync, sat_dias_descarga,
       codigo_postal_fiscal
     `)
     .eq('company_id', companyId)
     .single();
-  if (error) throw error;
-  // Normalizar nombres para el frontend — BuzonFiscal.jsx espera rfc_emisor
+
+  if (errSettings) throw errSettings;
+
+  // Query 2: estado real de la e.firma (tabla correcta)
+  // No lanzamos error si no existe — la empresa puede no tenerla aún
+  const { data: efirma } = await supabase
+    .from('company_efirma')
+    .select('configurada, rfc, nombre_titular, vigencia')
+    .eq('company_id', companyId)
+    .maybeSingle();   // maybeSingle: no falla si no hay fila
+
   return {
-    ...data,
-    rfc_emisor:           data?.rfc,
-    razon_social_emisor:  data?.razon_social,
-    company_id:           companyId,
+    // Datos generales
+    rfc_emisor:          settings?.rfc,
+    razon_social_emisor: settings?.razon_social,
+    regimen_fiscal:      settings?.regimen_fiscal_emisor,
+    sat_sync_activo:     settings?.sat_sync_activo ?? false,
+    sat_ultimo_sync:     settings?.sat_ultimo_sync,
+    sat_dias_descarga:   settings?.sat_dias_descarga ?? 30,
+    codigo_postal:       settings?.codigo_postal_fiscal,
+    company_id:          companyId,
+
+    // ── e.firma — campos reales desde company_efirma ──────
+    // efirma_configurada es la bandera que usan SyncPanel y BuzonFiscal
+    // para decidir si habilitar o no el botón "Iniciar descarga".
+    efirma_configurada:   efirma?.configurada ?? false,
+    efirma_rfc:           efirma?.rfc,
+    efirma_titular:       efirma?.nombre_titular,
+    efirma_vigencia:      efirma?.vigencia,
   };
 }
 

@@ -300,6 +300,56 @@ export async function eliminarNodoWbs(nodoId) {
 }
 
 /**
+ * Soft-delete masivo de nodos WBS a partir de sus template_nodo_ids.
+ *
+ * Se usa después de clonar el WBS desde una plantilla del sistema:
+ * los IDs del preview son los de obra_template_nodos, que quedan
+ * guardados en project_wbs.template_nodo_id. Con eso podemos
+ * localizar y eliminar los nodos que el usuario marcó en la preview.
+ *
+ * Para plantillas de empresa los nodos no tienen template_nodo_id
+ * confiable (pueden ser personalizados), así que en ese caso
+ * usamos el nombre del nodo como fallback.
+ *
+ * @param {string}   projectId         UUID del proyecto recién creado
+ * @param {string[]} templateNodoIds   IDs de obra_template_nodos a excluir
+ * @param {string[]} [nombresExcluir]  Fallback por nombre (plantillas empresa)
+ */
+export async function eliminarNodosWbsPorTemplateIds(
+  projectId,
+  templateNodoIds = [],
+  nombresExcluir  = [],
+) {
+  if (!templateNodoIds.length && !nombresExcluir.length) return
+
+  const ahora = new Date().toISOString()
+
+  // 1. Eliminar por template_nodo_id (plantillas del sistema)
+  if (templateNodoIds.length) {
+    const { error } = await supabase
+      .from('project_wbs')
+      .update({ is_deleted: true, updated_at: ahora })
+      .eq('project_id', projectId)
+      .in('template_nodo_id', templateNodoIds)
+
+    if (error) throw error
+  }
+
+  // 2. Eliminar por nombre como fallback (plantillas de empresa
+  //    cuyos nodos no tienen template_nodo_id del sistema)
+  if (nombresExcluir.length) {
+    const { error } = await supabase
+      .from('project_wbs')
+      .update({ is_deleted: true, updated_at: ahora })
+      .eq('project_id', projectId)
+      .is('template_nodo_id', null)          // solo nodos sin origen sistema
+      .in('nombre', nombresExcluir)
+
+    if (error) throw error
+  }
+}
+
+/**
  * Agrega un nodo personalizado al WBS de un proyecto.
  */
 export async function agregarNodoWbs({
