@@ -40,6 +40,7 @@ import {
   // ── FIX v2.2: flattenTree para extraer nodos del árbol preview ──
   flattenTree,
 } from '../../services/wbsPlantillas.service'
+import { aplicarDependenciasStd } from '../../services/programaObra.service'
 import { supabase } from '../../config/supabase'
 import { useAuth } from '../../context/AuthContext'  // ← FIX v2.3
 import ResponsableSelector from '../../components/shared/ResponsableSelector'
@@ -322,6 +323,16 @@ export default function ProjectWizard({ onSuccess, onCancel }) {
         }
       }
       // ── Fin FIX v2.2 ───────────────────────────────────────────────
+
+      // 6. Aplicar dependencias estándar OBRIX (CIVIL + ELECT)
+      //    Se aplica silenciosamente — el Residente puede modificarlas
+      //    desde el Programa de Obra después de crear el proyecto
+      try {
+        await aplicarDependenciasStd(proyecto.id)
+      } catch (_) {
+        // No romper el flujo si falla — las deps se pueden aplicar después
+        console.warn('[ProjectWizard] aplicarDependenciasStd falló silenciosamente')
+      }
 
       onSuccess(proyecto)
     } catch (e) {

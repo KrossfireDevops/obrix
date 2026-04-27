@@ -1,15 +1,13 @@
 // ============================================================
 //  OBRIX ERP — Programa de Obra (Gantt Editable)
-//  src/pages/obra/ProgramaObraPage.jsx  |  v1.0
+//  src/pages/obra/ProgramaObraPage.jsx  |  v2.0
 //
-//  Características:
-//    · Gantt editable con frappe-gantt (drag & drop de fechas)
-//    · Panel lateral: semáforo, avance real, cuadrilla, personal
-//    · KPIs superiores: avance global, actividades en riesgo
-//    · Captura de avance real por actividad
-//    · Asignación / retiro de personal por actividad
-//    · Simulador de recuperación (personas adicionales)
-//    · Selector de proyecto
+//  Mejoras v2.0:
+//    - Dependencias visibles en el Gantt como flechas
+//    - Clic en actividad → ModalRecursos (Deps/Personal/Maquinaria/Herramientas)
+//    - Alerta "Calculado con 1 elemento"
+//    - Exportación PDF con jsPDF + autoTable
+//    - Botón "Aplicar secuencia estándar OBRIX" en proyectos sin dependencias
 // ============================================================
 
 import { useState, useEffect, useCallback, useRef } from 'react'
@@ -18,19 +16,21 @@ import { MainLayout }         from '../../components/layout/MainLayout'
 import { RequirePermission }  from '../../components/auth/PermissionGuard'
 import { useToast }           from '../../hooks/useToast'
 import { supabase }           from '../../config/supabase'
+import ModalRecursos          from './ModalRecursos'
 import {
   getGanttData, calcularProgramaObra, recalcularAlertas,
   ajustarFechasNodo, resetearAjusteNodo, registrarAvance,
   getPersonalAsignado, asignarPersonalActividad,
   retirarPersonalActividad, upsertCuadrilla,
   getKpisPrograma, getAlertasActivas,
+  getDependencias, aplicarDependenciasStd,
   SEMAFORO_CFG,
 } from '../../services/programaObra.service'
-import { getPersonal } from '../../services/gestionPersonal.service'
 import {
   RefreshCw, Users, AlertTriangle, CheckCircle,
   ChevronRight, X, Plus, UserPlus, UserMinus,
-  TrendingUp, Clock, BarChart2, Zap,
+  TrendingUp, Clock, BarChart2, Zap, FileDown,
+  Link2, Settings, Sparkles,
 } from 'lucide-react'
 
 // ─────────────────────────────────────────────────────────────
@@ -54,7 +54,7 @@ const inp = {
 }
 
 // ─────────────────────────────────────────────────────────────
-// BADGE DE SEMÁFORO
+// BADGE SEMÁFORO
 // ─────────────────────────────────────────────────────────────
 const SemaforoBadge = ({ semaforo, size = 'md' }) => {
   const c = SEMAFORO_CFG[semaforo] ?? SEMAFORO_CFG.sin_inicio
@@ -100,384 +100,209 @@ const BarraProgreso = ({ real, plan, semaforo }) => {
 }
 
 // ─────────────────────────────────────────────────────────────
-// PANEL LATERAL — Detalle de la actividad seleccionada
+// EXPORTAR PDF
 // ─────────────────────────────────────────────────────────────
-const PanelActividad = ({ nodo, projectId, onClose, onActualizar, toast }) => {
-  const [personal,      setPersonal]      = useState([])
-  const [catalogoPers,  setCatalogoPers]  = useState([])
-  const [loading,       setLoading]       = useState(true)
-  const [showAvance,    setShowAvance]    = useState(false)
-  const [showAsignar,   setShowAsignar]   = useState(false)
-  const [formAvance,    setFormAvance]    = useState({
-    pct_avance: nodo.pct_avance_real ?? 0,
-    fecha_corte: new Date().toISOString().split('T')[0],
-    personas_dia: '',
-    notas: '',
-  })
-  const [formAsig,    setFormAsig]    = useState({ trabajadorId: '', es_lider: false, rol_actividad: '' })
-  const [saving,      setSaving]      = useState(false)
-
-  useEffect(() => {
-    Promise.all([
-      getPersonalAsignado(nodo.wbs_id),
-      getPersonal({ estatus: 'activo' }),
-    ]).then(([pers, cat]) => {
-      setPersonal(pers)
-      setCatalogoPers(Array.isArray(cat) ? cat : (cat?.data ?? []))
-      setLoading(false)
+const exportarPDF = async (tareas, proyectoNombre) => {
+  // Cargar jsPDF dinámicamente
+  if (!window.jspdf) {
+    await new Promise((res, rej) => {
+      const s = document.createElement('script')
+      s.src = 'https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js'
+      s.onload = res; s.onerror = rej
+      document.head.appendChild(s)
     })
-  }, [nodo.wbs_id])
+  }
+  if (!window.jspdf?.jsPDF) return
 
-  const handleGuardarAvance = async () => {
-    if (!formAvance.pct_avance && formAvance.pct_avance !== 0) {
-      toast.error('Ingresa el porcentaje de avance'); return
-    }
-    setSaving(true)
-    try {
-      await registrarAvance(projectId, nodo.wbs_id, {
-        pct_avance:   formAvance.pct_avance,
-        fecha_corte:  formAvance.fecha_corte,
-        personas_dia: formAvance.personas_dia || null,
-        notas:        formAvance.notas || null,
-        pct_avance_plan: nodo.pct_avance_plan,
-      })
-      await recalcularAlertas(projectId)
-      toast.success('Avance registrado ✓')
-      setShowAvance(false)
-      onActualizar()
-    } catch (e) {
-      toast.error(e.message)
-    } finally {
-      setSaving(false)
-    }
+  await new Promise((res, rej) => {
+    if (window.jspdf?.jsPDF?.API?.autoTable) { res(); return }
+    const s = document.createElement('script')
+    s.src = 'https://cdnjs.cloudflare.com/ajax/libs/jspdf-autotable/3.8.2/jspdf.plugin.autotable.min.js'
+    s.onload = res; s.onerror = rej
+    document.head.appendChild(s)
+  })
+
+  const { jsPDF } = window.jspdf
+  const doc = new jsPDF({ orientation: 'landscape', unit: 'mm', format: 'letter' })
+
+  const semColors = {
+    verde:      [16, 185, 129],
+    amber:      [245, 158, 11],
+    rojo:       [239, 68, 68],
+    sin_inicio: [156, 163, 175],
   }
 
-  const handleAsignar = async () => {
-    if (!formAsig.trabajadorId) { toast.error('Selecciona un trabajador'); return }
-    setSaving(true)
-    try {
-      await asignarPersonalActividad(projectId, nodo.wbs_id, formAsig.trabajadorId, {
-        es_lider:      formAsig.es_lider,
-        rol_actividad: formAsig.rol_actividad || null,
-      })
-      toast.success('Personal asignado ✓')
-      setShowAsignar(false)
-      setFormAsig({ trabajadorId: '', es_lider: false, rol_actividad: '' })
-      const pers = await getPersonalAsignado(nodo.wbs_id)
-      setPersonal(pers)
-      onActualizar()
-    } catch (e) {
-      toast.error(e.message)
-    } finally {
-      setSaving(false)
-    }
-  }
+  // ── Encabezado ────────────────────────────────────────────
+  doc.setFillColor(37, 99, 235)
+  doc.rect(0, 0, 280, 20, 'F')
+  doc.setTextColor(255, 255, 255)
+  doc.setFontSize(14)
+  doc.setFont('helvetica', 'bold')
+  doc.text('OBRIX ERP — Programa de Obra', 14, 9)
+  doc.setFontSize(10)
+  doc.setFont('helvetica', 'normal')
+  doc.text(proyectoNombre ?? 'Proyecto', 14, 15)
+  doc.text(`Generado: ${new Date().toLocaleDateString('es-MX', {
+    day: '2-digit', month: 'long', year: 'numeric', hour: '2-digit', minute: '2-digit'
+  })}`, 280 - 14, 15, { align: 'right' })
 
-  const handleRetirar = async (asigId) => {
-    if (!confirm('¿Retirar este trabajador de la actividad?')) return
-    try {
-      await retirarPersonalActividad(asigId)
-      toast.success('Trabajador retirado')
-      const pers = await getPersonalAsignado(nodo.wbs_id)
-      setPersonal(pers)
-      onActualizar()
-    } catch (e) {
-      toast.error(e.message)
-    }
-  }
+  // ── Tabla de actividades ──────────────────────────────────
+  const filas = tareas
+    .filter(t => t.fecha_inicio_plan || t.fecha_inicio_adj)
+    .map((t, i) => {
+      const ini = t.fecha_inicio_adj ?? t.fecha_inicio_plan ?? ''
+      const fin = t.fecha_fin_adj    ?? t.fecha_fin_plan    ?? ''
+      return [
+        i + 1,
+        t.disciplina_codigo ?? '—',
+        t.nombre,
+        ini ? new Date(ini + 'T12:00:00').toLocaleDateString('es-MX', { day: '2-digit', month: 'short', year: '2-digit' }) : '—',
+        fin ? new Date(fin + 'T12:00:00').toLocaleDateString('es-MX', { day: '2-digit', month: 'short', year: '2-digit' }) : '—',
+        `${t.duracion_plan ?? 0}d`,
+        `${Number(t.pct_avance_real || 0).toFixed(0)}%`,
+        t.semaforo ?? 'sin_inicio',
+      ]
+    })
 
-  const semCfg = SEMAFORO_CFG[nodo.semaforo] ?? SEMAFORO_CFG.sin_inicio
+  doc.autoTable({
+    startY: 25,
+    head: [['#', 'Disc.', 'Actividad', 'Inicio', 'Fin', 'Días', 'Avance', 'Estado']],
+    body: filas,
+    styles: { fontSize: 8, cellPadding: 2.5 },
+    headStyles: { fillColor: [30, 64, 175], textColor: 255, fontStyle: 'bold', fontSize: 8 },
+    columnStyles: {
+      0: { cellWidth: 8,  halign: 'center' },
+      1: { cellWidth: 16, halign: 'center', font: 'courier' },
+      2: { cellWidth: 80 },
+      3: { cellWidth: 22, halign: 'center' },
+      4: { cellWidth: 22, halign: 'center' },
+      5: { cellWidth: 12, halign: 'center' },
+      6: { cellWidth: 14, halign: 'center' },
+      7: { cellWidth: 20, halign: 'center' },
+    },
+    alternateRowStyles: { fillColor: [248, 250, 252] },
+    didDrawCell: (data) => {
+      // Colorear columna Estado con el color del semáforo
+      if (data.column.index === 7 && data.section === 'body') {
+        const sem = data.cell.raw
+        const col = semColors[sem] ?? semColors.sin_inicio
+        data.doc.setFillColor(...col)
+        data.doc.setTextColor(255, 255, 255)
+        data.doc.rect(data.cell.x, data.cell.y, data.cell.width, data.cell.height, 'F')
+        data.doc.setFontSize(7)
+        const label = SEMAFORO_CFG[sem]?.label ?? 'Sin iniciar'
+        data.doc.text(label, data.cell.x + data.cell.width / 2,
+          data.cell.y + data.cell.height / 2 + 1, { align: 'center' })
+      }
+    },
+  })
 
-  return (
-    <div style={{ display: 'flex', flexDirection: 'column', height: '100%', overflow: 'hidden' }}>
-
-      {/* Header */}
-      <div style={{ padding: '16px 18px', borderBottom: '1px solid #E5E7EB', flexShrink: 0 }}>
-        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
-          <div style={{ flex: 1, minWidth: 0 }}>
-            <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginBottom: 4 }}>
-              {nodo.disciplina_color && (
-                <span style={{ width: 10, height: 10, borderRadius: 3, flexShrink: 0,
-                  backgroundColor: nodo.disciplina_color }} />
-              )}
-              <span style={{ fontSize: 10, color: '#9CA3AF', fontFamily: 'monospace' }}>
-                {nodo.disciplina_codigo ?? '—'}
-              </span>
-              <SemaforoBadge semaforo={nodo.semaforo} size="sm" />
-            </div>
-            <h3 style={{ fontSize: 14, fontWeight: 700, color: '#111827',
-              margin: 0, lineHeight: 1.3 }}>{nodo.nombre}</h3>
-          </div>
-          <button onClick={onClose} style={{ background: 'none', border: 'none',
-            cursor: 'pointer', color: '#9CA3AF', padding: 3, flexShrink: 0 }}>
-            <X size={17} />
-          </button>
-        </div>
-      </div>
-
-      <div style={{ flex: 1, overflowY: 'auto', padding: '14px 18px' }}>
-
-        {/* Fechas */}
-        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 8, marginBottom: 14 }}>
-          {[
-            { label: 'Inicio plan', value: fmtFecha(nodo.fecha_inicio_plan) },
-            { label: 'Fin plan',    value: fmtFecha(nodo.fecha_fin_plan)    },
-            { label: 'Duración',    value: `${nodo.duracion_plan ?? 0} días hábiles` },
-            { label: 'Días atraso', value: nodo.dias_atraso > 0
-                ? <span style={{ color: '#DC2626', fontWeight: 700 }}>{nodo.dias_atraso}d</span>
-                : <span style={{ color: '#065F46' }}>En tiempo</span> },
-          ].map(f => (
-            <div key={f.label} style={{ padding: '8px 9px', backgroundColor: '#F9FAFB',
-              borderRadius: 7, border: '1px solid #F3F4F6' }}>
-              <p style={{ fontSize: 10, color: '#9CA3AF', margin: '0 0 2px', fontWeight: 600 }}>
-                {f.label}
-              </p>
-              <p style={{ fontSize: 12, color: '#111827', margin: 0, fontWeight: 500 }}>
-                {f.value}
-              </p>
-            </div>
-          ))}
-        </div>
-
-        {/* Avance */}
-        <div style={{ marginBottom: 14 }}>
-          <div style={{ display: 'flex', justifyContent: 'space-between',
-            alignItems: 'center', marginBottom: 8 }}>
-            <p style={{ fontSize: 11, fontWeight: 700, color: '#374151',
-              textTransform: 'uppercase', letterSpacing: '0.05em', margin: 0 }}>
-              Avance
-            </p>
-            <button onClick={() => setShowAvance(!showAvance)}
-              style={{ fontSize: 11, color: '#2563EB', background: 'none',
-                border: 'none', cursor: 'pointer', fontWeight: 600 }}>
-              {showAvance ? 'Cancelar' : '+ Capturar'}
-            </button>
-          </div>
-
-          <BarraProgreso
-            real={nodo.pct_avance_real}
-            plan={nodo.pct_avance_plan}
-            semaforo={nodo.semaforo}
-          />
-
-          {showAvance && (
-            <div style={{ marginTop: 10, padding: 10, backgroundColor: '#F0F9FF',
-              border: '1px solid #BAE6FD', borderRadius: 9 }}>
-              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 8, marginBottom: 8 }}>
-                <div>
-                  <label style={{ fontSize: 10, color: '#6B7280', display: 'block', marginBottom: 2 }}>
-                    % avance real *
-                  </label>
-                  <input type="number" min="0" max="100" step="0.5" style={inp}
-                    value={formAvance.pct_avance}
-                    onChange={e => setFormAvance(f => ({ ...f, pct_avance: e.target.value }))} />
-                </div>
-                <div>
-                  <label style={{ fontSize: 10, color: '#6B7280', display: 'block', marginBottom: 2 }}>
-                    Fecha corte
-                  </label>
-                  <input type="date" style={inp} value={formAvance.fecha_corte}
-                    onChange={e => setFormAvance(f => ({ ...f, fecha_corte: e.target.value }))} />
-                </div>
-                <div>
-                  <label style={{ fontSize: 10, color: '#6B7280', display: 'block', marginBottom: 2 }}>
-                    Personas·día
-                  </label>
-                  <input type="number" min="0" style={inp}
-                    placeholder="Ej: 14"
-                    value={formAvance.personas_dia}
-                    onChange={e => setFormAvance(f => ({ ...f, personas_dia: e.target.value }))} />
-                </div>
-                <div>
-                  <label style={{ fontSize: 10, color: '#6B7280', display: 'block', marginBottom: 2 }}>
-                    Notas
-                  </label>
-                  <input type="text" style={inp} placeholder="Observaciones..."
-                    value={formAvance.notas}
-                    onChange={e => setFormAvance(f => ({ ...f, notas: e.target.value }))} />
-                </div>
-              </div>
-              <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 7 }}>
-                <button onClick={() => setShowAvance(false)}
-                  style={{ fontSize: 11, padding: '5px 10px', borderRadius: 7,
-                    border: '1px solid #E5E7EB', backgroundColor: '#fff',
-                    cursor: 'pointer', color: '#374151' }}>
-                  Cancelar
-                </button>
-                <button onClick={handleGuardarAvance} disabled={saving}
-                  style={{ fontSize: 11, padding: '5px 12px', borderRadius: 7,
-                    border: 'none', backgroundColor: '#2563EB', color: '#fff',
-                    cursor: 'pointer', fontWeight: 600, display: 'flex',
-                    alignItems: 'center', gap: 4 }}>
-                  {saving && <RefreshCw size={11} style={{ animation: 'spin 1s linear infinite' }} />}
-                  Guardar avance
-                </button>
-              </div>
-            </div>
-          )}
-        </div>
-
-        {/* Cuadrilla */}
-        <div style={{ marginBottom: 14, padding: 10,
-          backgroundColor: '#F9FAFB', border: '1px solid #E5E7EB', borderRadius: 9 }}>
-          <p style={{ fontSize: 11, fontWeight: 700, color: '#374151',
-            textTransform: 'uppercase', letterSpacing: '0.05em', margin: '0 0 8px' }}>
-            Cuadrilla
-          </p>
-          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: 8 }}>
-            {[
-              { label: 'Planeada', value: nodo.personas_plan ?? 1, color: '#1E40AF' },
-              { label: 'Actual',   value: nodo.personas_real ?? 0, color: '#065F46' },
-              { label: 'Adicionales',
-                value: nodo.personas_adicionales > 0
-                  ? `+${nodo.personas_adicionales}` : '—',
-                color: nodo.personas_adicionales > 0 ? '#DC2626' : '#6B7280' },
-            ].map(m => (
-              <div key={m.label} style={{ textAlign: 'center' }}>
-                <p style={{ fontSize: 9, color: '#9CA3AF', margin: '0 0 2px',
-                  fontWeight: 600, textTransform: 'uppercase' }}>{m.label}</p>
-                <p style={{ fontSize: 18, fontWeight: 800, color: m.color, margin: 0 }}>
-                  {m.value}
-                </p>
-              </div>
-            ))}
-          </div>
-          {nodo.personas_adicionales > 0 && (
-            <div style={{ marginTop: 8, padding: '5px 8px',
-              backgroundColor: '#FEF2F2', border: '1px solid #FECACA', borderRadius: 6 }}>
-              <p style={{ fontSize: 10, color: '#991B1B', margin: 0 }}>
-                Se necesitan <strong>{nodo.personas_adicionales} personas adicionales</strong>{' '}
-                para cumplir la fecha compromiso.
-              </p>
-            </div>
-          )}
-        </div>
-
-        {/* Personal asignado */}
-        <div>
-          <div style={{ display: 'flex', justifyContent: 'space-between',
-            alignItems: 'center', marginBottom: 8 }}>
-            <p style={{ fontSize: 11, fontWeight: 700, color: '#374151',
-              textTransform: 'uppercase', letterSpacing: '0.05em', margin: 0 }}>
-              Personal en actividad
-            </p>
-            <button onClick={() => setShowAsignar(!showAsignar)}
-              style={{ fontSize: 11, color: '#2563EB', background: 'none',
-                border: 'none', cursor: 'pointer', fontWeight: 600,
-                display: 'flex', alignItems: 'center', gap: 4 }}>
-              <UserPlus size={12} /> Asignar
-            </button>
-          </div>
-
-          {showAsignar && (
-            <div style={{ padding: 10, backgroundColor: '#F0FDF4',
-              border: '1px solid #A7F3D0', borderRadius: 9, marginBottom: 10 }}>
-              <div style={{ marginBottom: 7 }}>
-                <label style={{ fontSize: 10, color: '#6B7280', display: 'block', marginBottom: 2 }}>
-                  Trabajador *
-                </label>
-                <select style={inp} value={formAsig.trabajadorId}
-                  onChange={e => setFormAsig(f => ({ ...f, trabajadorId: e.target.value }))}>
-                  <option value="">— Seleccionar —</option>
-                  {catalogoPers
-                    .filter(p => !personal.some(pa => pa.trabajador_id === p.id))
-                    .map(p => (
-                      <option key={p.id} value={p.id}>
-                        {p.nombre_completo}{p.especialidad ? ` · ${p.especialidad}` : ''}
-                      </option>
-                    ))
-                  }
-                </select>
-              </div>
-              <div style={{ marginBottom: 7 }}>
-                <label style={{ fontSize: 10, color: '#6B7280', display: 'block', marginBottom: 2 }}>
-                  Rol en actividad
-                </label>
-                <input type="text" style={inp} placeholder="Oficial, Ayudante, Supervisor..."
-                  value={formAsig.rol_actividad}
-                  onChange={e => setFormAsig(f => ({ ...f, rol_actividad: e.target.value }))} />
-              </div>
-              <label style={{ display: 'flex', alignItems: 'center', gap: 6,
-                fontSize: 11, color: '#374151', cursor: 'pointer', marginBottom: 8 }}>
-                <input type="checkbox" checked={formAsig.es_lider}
-                  onChange={e => setFormAsig(f => ({ ...f, es_lider: e.target.checked }))}
-                  style={{ accentColor: '#2563EB' }} />
-                Líder de actividad
-              </label>
-              <div style={{ display: 'flex', gap: 7, justifyContent: 'flex-end' }}>
-                <button onClick={() => setShowAsignar(false)}
-                  style={{ fontSize: 11, padding: '5px 10px', borderRadius: 7,
-                    border: '1px solid #E5E7EB', backgroundColor: '#fff',
-                    cursor: 'pointer', color: '#374151' }}>
-                  Cancelar
-                </button>
-                <button onClick={handleAsignar} disabled={saving || !formAsig.trabajadorId}
-                  style={{ fontSize: 11, padding: '5px 12px', borderRadius: 7,
-                    border: 'none', backgroundColor: '#059669', color: '#fff',
-                    cursor: 'pointer', fontWeight: 600, display: 'flex',
-                    alignItems: 'center', gap: 4 }}>
-                  {saving && <RefreshCw size={11} style={{ animation: 'spin 1s linear infinite' }} />}
-                  Confirmar
-                </button>
-              </div>
-            </div>
-          )}
-
-          {loading ? (
-            <div style={{ textAlign: 'center', padding: 16, color: '#9CA3AF' }}>
-              <RefreshCw size={14} style={{ animation: 'spin 1s linear infinite' }} />
-            </div>
-          ) : personal.length === 0 ? (
-            <div style={{ textAlign: 'center', padding: '12px 0', color: '#9CA3AF' }}>
-              <Users size={20} style={{ margin: '0 auto 4px', opacity: 0.3 }} />
-              <p style={{ fontSize: 11 }}>Sin personal asignado</p>
-            </div>
-          ) : (
-            <div style={{ display: 'flex', flexDirection: 'column', gap: 5 }}>
-              {personal.map(p => (
-                <div key={p.id} style={{ display: 'flex', alignItems: 'center', gap: 8,
-                  padding: '7px 9px', backgroundColor: '#F9FAFB',
-                  border: '1px solid #E5E7EB', borderRadius: 7 }}>
-                  <div style={{ width: 28, height: 28, borderRadius: '50%',
-                    backgroundColor: '#EFF6FF', display: 'flex', alignItems: 'center',
-                    justifyContent: 'center', fontSize: 11, fontWeight: 700,
-                    color: '#1E40AF', flexShrink: 0 }}>
-                    {(p.trabajador?.nombre_completo ?? '?')[0]}
-                  </div>
-                  <div style={{ flex: 1, minWidth: 0 }}>
-                    <p style={{ fontSize: 12, fontWeight: 600, color: '#111827',
-                      margin: 0, display: 'flex', alignItems: 'center', gap: 5 }}>
-                      {p.trabajador?.nombre_completo ?? '—'}
-                      {p.es_lider && (
-                        <span style={{ fontSize: 9, fontWeight: 700,
-                          backgroundColor: '#FEF9C3', color: '#B45309',
-                          padding: '0 5px', borderRadius: 4 }}>Líder</span>
-                      )}
-                    </p>
-                    <p style={{ fontSize: 10, color: '#6B7280', margin: 0 }}>
-                      {p.rol_actividad ?? p.trabajador?.especialidad ?? '—'}
-                    </p>
-                  </div>
-                  <button onClick={() => handleRetirar(p.id)}
-                    title="Retirar de actividad"
-                    style={{ padding: 5, border: 'none', background: 'none',
-                      cursor: 'pointer', color: '#9CA3AF' }}>
-                    <UserMinus size={13} />
-                  </button>
-                </div>
-              ))}
-            </div>
-          )}
-        </div>
-      </div>
-    </div>
+  // ── Gantt simplificado en barras ──────────────────────────
+  const tareasConFechas = tareas.filter(t =>
+    (t.fecha_inicio_adj ?? t.fecha_inicio_plan) &&
+    (t.fecha_fin_adj    ?? t.fecha_fin_plan)
   )
+
+  if (tareasConFechas.length > 0) {
+    doc.addPage()
+
+    doc.setFillColor(37, 99, 235)
+    doc.rect(0, 0, 280, 12, 'F')
+    doc.setTextColor(255, 255, 255)
+    doc.setFontSize(11)
+    doc.setFont('helvetica', 'bold')
+    doc.text('Diagrama de Gantt — Programa de Obra', 14, 8)
+
+    const fechasMs = tareasConFechas.flatMap(t => [
+      new Date((t.fecha_inicio_adj ?? t.fecha_inicio_plan) + 'T12:00:00').getTime(),
+      new Date((t.fecha_fin_adj    ?? t.fecha_fin_plan)    + 'T12:00:00').getTime(),
+    ])
+    const minFecha  = Math.min(...fechasMs)
+    const maxFecha  = Math.max(...fechasMs)
+    const rangeDias = Math.max(1, (maxFecha - minFecha) / 86400000)
+
+    const margenIzq = 80
+    const anchoGantt = 180
+    const altoBarra  = 4.5
+    const paddingFila = 1.2
+    const yInicio = 20
+
+    const xFecha = (fecha) => {
+      const ms = new Date(fecha + 'T12:00:00').getTime()
+      return margenIzq + ((ms - minFecha) / (maxFecha - minFecha)) * anchoGantt
+    }
+
+    // Encabezado columnas del Gantt
+    doc.setTextColor(30, 64, 175)
+    doc.setFontSize(7)
+    doc.setFont('helvetica', 'bold')
+    doc.text('Actividad', 14, yInicio - 3)
+    doc.text(new Date(minFecha).toLocaleDateString('es-MX', { month: 'short', year: '2-digit' }),
+      margenIzq, yInicio - 3)
+    doc.text(new Date(maxFecha).toLocaleDateString('es-MX', { month: 'short', year: '2-digit' }),
+      margenIzq + anchoGantt, yInicio - 3, { align: 'right' })
+
+    // Línea divisoria
+    doc.setDrawColor(229, 231, 235)
+    doc.line(margenIzq, yInicio - 1, margenIzq + anchoGantt, yInicio - 1)
+
+    tareasConFechas.slice(0, 40).forEach((t, i) => {
+      const y = yInicio + i * (altoBarra + paddingFila)
+      const ini = t.fecha_inicio_adj ?? t.fecha_inicio_plan
+      const fin = t.fecha_fin_adj    ?? t.fecha_fin_plan
+      const xIni = xFecha(ini)
+      const xFin = Math.max(xFecha(fin), xIni + 2)
+      const col  = semColors[t.semaforo] ?? semColors.sin_inicio
+
+      // Fila de fondo alternado
+      if (i % 2 === 0) {
+        doc.setFillColor(248, 250, 252)
+        doc.rect(0, y - 0.5, 280, altoBarra + paddingFila, 'F')
+      }
+
+      // Nombre de actividad
+      doc.setTextColor(17, 24, 39)
+      doc.setFontSize(6)
+      doc.setFont('helvetica', 'normal')
+      const nombreCorto = t.nombre.length > 35 ? t.nombre.slice(0, 33) + '…' : t.nombre
+      doc.text(nombreCorto, 14, y + altoBarra / 2 + 0.5)
+
+      // Barra del Gantt
+      doc.setFillColor(...col)
+      doc.roundedRect(xIni, y, Math.max(xFin - xIni, 2), altoBarra, 0.8, 0.8, 'F')
+
+      // % avance sobre la barra
+      if (t.pct_avance_real > 0) {
+        doc.setFillColor(255, 255, 255, 0.4)
+        const anchoAvance = (Math.max(xFin - xIni, 2)) * (Math.min(t.pct_avance_real, 100) / 100)
+        doc.setFillColor(255, 255, 255)
+        doc.setGState?.(doc.GState?.({ opacity: 0.35 }))
+        doc.rect(xIni, y, anchoAvance, altoBarra, 'F')
+        doc.setGState?.(doc.GState?.({ opacity: 1 }))
+      }
+    })
+  }
+
+  // ── Pie de página en todas las páginas ───────────────────
+  const totalPags = doc.getNumberOfPages()
+  for (let p = 1; p <= totalPags; p++) {
+    doc.setPage(p)
+    doc.setFontSize(7)
+    doc.setTextColor(156, 163, 175)
+    doc.setFont('helvetica', 'normal')
+    doc.text(`OBRIX ERP · ${proyectoNombre ?? ''} · Pág. ${p} de ${totalPags}`,
+      140, 210, { align: 'center' })
+  }
+
+  doc.save(`Programa_Obra_${(proyectoNombre ?? 'proyecto').replace(/\s+/g, '_')}_${
+    new Date().toISOString().split('T')[0]
+  }.pdf`)
 }
 
 // ─────────────────────────────────────────────────────────────
 // GANTT WRAPPER (frappe-gantt via CDN)
 // ─────────────────────────────────────────────────────────────
-const GanttChart = ({ tareas, onDateChange, onTaskClick, viewMode }) => {
+const GanttChart = ({ tareas, dependencias, onDateChange, onTaskClick, viewMode }) => {
   const containerRef = useRef(null)
   const ganttRef     = useRef(null)
 
@@ -487,14 +312,22 @@ const GanttChart = ({ tareas, onDateChange, onTaskClick, viewMode }) => {
     const init = () => {
       if (!window.Gantt) return
 
+      // Construir mapa de dependencias: sucesor → predecesor
+      const depMap = {}
+      dependencias?.forEach(d => {
+        if (!depMap[d.sucesor_id]) depMap[d.sucesor_id] = []
+        depMap[d.sucesor_id].push(d.predecesor_id)
+      })
+
       const tasks = tareas.map(t => ({
-        id:         t.wbs_id,
-        name:       t.nombre,
-        start:      (t.fecha_inicio_adj ?? t.fecha_inicio_plan ?? '').toString(),
-        end:        (t.fecha_fin_adj    ?? t.fecha_fin_plan    ?? '').toString(),
-        progress:   Math.round(Number(t.pct_avance_real) || 0),
+        id:           t.wbs_id,
+        name:         t.nombre,
+        start:        (t.fecha_inicio_adj ?? t.fecha_inicio_plan ?? '').toString(),
+        end:          (t.fecha_fin_adj    ?? t.fecha_fin_plan    ?? '').toString(),
+        progress:     Math.round(Number(t.pct_avance_real) || 0),
         custom_class: `semaforo-${t.semaforo ?? 'sin_inicio'}`,
-        dependencies: '',
+        // ← DEPENDENCIAS: frappe-gantt las dibuja como flechas
+        dependencies: (depMap[t.wbs_id] ?? []).join(','),
       })).filter(t => t.start && t.end)
 
       if (!tasks.length) return
@@ -502,14 +335,14 @@ const GanttChart = ({ tareas, onDateChange, onTaskClick, viewMode }) => {
       containerRef.current.innerHTML = ''
 
       ganttRef.current = new window.Gantt(containerRef.current, tasks, {
-        view_mode:          viewMode || 'Week',
-        language:           'es',
-        bar_height:         20,
-        bar_corner_radius:  3,
-        arrow_curve:        5,
-        padding:            14,
-        date_format:        'YYYY-MM-DD',
-        custom_popup_html:  null,
+        view_mode:         viewMode || 'Week',
+        language:          'es',
+        bar_height:        20,
+        bar_corner_radius: 3,
+        arrow_curve:       5,
+        padding:           14,
+        date_format:       'YYYY-MM-DD',
+        custom_popup_html: null,
         on_date_change: (task, start, end) => {
           if (onDateChange) onDateChange(task.id, start, end)
         },
@@ -534,24 +367,23 @@ const GanttChart = ({ tareas, onDateChange, onTaskClick, viewMode }) => {
     }
 
     return () => {
-      if (ganttRef.current) {
-        try { containerRef.current && (containerRef.current.innerHTML = '') }
-        catch (_) {}
-      }
+      try { containerRef.current && (containerRef.current.innerHTML = '') }
+      catch (_) {}
     }
-  }, [tareas, viewMode])
+  }, [tareas, dependencias, viewMode])
 
   return (
     <>
       <style>{`
-        .semaforo-verde     .bar { fill: #10B981 !important; }
-        .semaforo-amber     .bar { fill: #F59E0B !important; }
-        .semaforo-rojo      .bar { fill: #EF4444 !important; }
+        .semaforo-verde      .bar { fill: #10B981 !important; }
+        .semaforo-amber      .bar { fill: #F59E0B !important; }
+        .semaforo-rojo       .bar { fill: #EF4444 !important; }
         .semaforo-sin_inicio .bar { fill: #D1D5DB !important; }
-        .gantt .bar-progress { fill: rgba(255,255,255,0.35) !important; }
-        .gantt .bar-label { fill: #fff !important; font-size: 11px !important; }
-        .gantt-container { overflow-x: auto; }
-        @keyframes spin { to { transform: rotate(360deg); } }
+        .gantt .bar-progress      { fill: rgba(255,255,255,0.35) !important; }
+        .gantt .bar-label         { fill: #fff !important; font-size: 11px !important; }
+        .gantt .arrow             { stroke: #6B7280 !important; stroke-width: 1.5 !important; }
+        .gantt-container          { overflow-x: auto; }
+        @keyframes spin           { to { transform: rotate(360deg); } }
       `}</style>
       <div ref={containerRef} className="gantt-container"
         style={{ minHeight: 200, width: '100%' }} />
@@ -566,15 +398,19 @@ export default function ProgramaObraPage() {
   const [searchParams]                          = useSearchParams()
   const { toast }                               = useToast()
 
-  const [projects,      setProjects]            = useState([])
-  const [projectId,     setProjectId]           = useState(searchParams.get('project') || '')
-  const [tareas,        setTareas]              = useState([])
-  const [kpis,          setKpis]                = useState(null)
-  const [alertas,       setAlertas]             = useState([])
-  const [loading,       setLoading]             = useState(false)
-  const [calculando,    setCalculando]          = useState(false)
-  const [nodoActivo,    setNodoActivo]          = useState(null)
-  const [viewMode,      setViewMode]            = useState('Week')
+  const [projects,       setProjects]           = useState([])
+  const [projectId,      setProjectId]          = useState(searchParams.get('project') || '')
+  const [projectNombre,  setProjectNombre]      = useState('')
+  const [tareas,         setTareas]             = useState([])
+  const [dependencias,   setDependencias]       = useState([])
+  const [kpis,           setKpis]               = useState(null)
+  const [alertas,        setAlertas]            = useState([])
+  const [loading,        setLoading]            = useState(false)
+  const [calculando,     setCalculando]         = useState(false)
+  const [exportando,     setExportando]         = useState(false)
+  const [nodoActivo,     setNodoActivo]         = useState(null)
+  const [viewMode,       setViewMode]           = useState('Week')
+  const [sinDeps,        setSinDeps]            = useState(false)
 
   // Cargar proyectos activos
   useEffect(() => {
@@ -582,7 +418,10 @@ export default function ProgramaObraPage() {
       .eq('status', 'active').order('code')
       .then(({ data }) => {
         setProjects(data ?? [])
-        if (!projectId && data?.length) setProjectId(data[0].id)
+        if (!projectId && data?.length) {
+          setProjectId(data[0].id)
+          setProjectNombre(data[0].name)
+        }
       })
   }, [])
 
@@ -590,14 +429,17 @@ export default function ProgramaObraPage() {
     if (!projectId) return
     setLoading(true)
     try {
-      const [ganttData, kpisData, alertasData] = await Promise.all([
+      const [ganttData, kpisData, alertasData, depsData] = await Promise.all([
         getGanttData(projectId),
         getKpisPrograma(projectId),
         getAlertasActivas(projectId),
+        getDependencias(projectId),
       ])
       setTareas(ganttData)
       setKpis(kpisData)
       setAlertas(alertasData)
+      setDependencias(depsData)
+      setSinDeps(depsData.length === 0)
     } catch (e) {
       toast.error('Error al cargar el programa: ' + e.message)
     } finally {
@@ -606,6 +448,12 @@ export default function ProgramaObraPage() {
   }, [projectId])
 
   useEffect(() => { cargar() }, [cargar])
+
+  // Actualizar nombre del proyecto al cambiar selector
+  useEffect(() => {
+    const p = projects.find(p => p.id === projectId)
+    if (p) setProjectNombre(p.name)
+  }, [projectId, projects])
 
   const handleCalcular = async () => {
     if (!projectId) return
@@ -637,6 +485,23 @@ export default function ProgramaObraPage() {
     }
   }
 
+  const handleAplicarSecuenciaStd = async () => {
+    if (!projectId) return
+    if (!confirm('¿Aplicar la secuencia estándar OBRIX a este proyecto? Se crearán dependencias basadas en la lógica constructiva estándar.')) return
+    setCalculando(true)
+    try {
+      const n = await aplicarDependenciasStd(projectId)
+      toast.success(`✅ ${n} dependencias aplicadas — recalculando programa…`)
+      await calcularProgramaObra(projectId, true)
+      await recalcularAlertas(projectId)
+      cargar()
+    } catch (e) {
+      toast.error(e.message)
+    } finally {
+      setCalculando(false)
+    }
+  }
+
   const handleDateChange = async (wbsId, start, end) => {
     if (!projectId) return
     try {
@@ -655,9 +520,18 @@ export default function ProgramaObraPage() {
     if (nodo) setNodoActivo(nodo)
   }
 
-  const nodoActivoData = nodoActivo
-    ? tareas.find(t => t.wbs_id === nodoActivo.wbs_id) ?? nodoActivo
-    : null
+  const handleExportarPDF = async () => {
+    if (!tareas.length) { toast.error('No hay actividades para exportar'); return }
+    setExportando(true)
+    try {
+      await exportarPDF(tareas, projectNombre)
+      toast.success('PDF generado ✓')
+    } catch (e) {
+      toast.error('Error al generar PDF: ' + e.message)
+    } finally {
+      setExportando(false)
+    }
+  }
 
   const sinPrograma = tareas.length === 0 && !loading
 
@@ -670,10 +544,14 @@ export default function ProgramaObraPage() {
           <div style={{ display: 'flex', alignItems: 'center', gap: 10,
             marginBottom: 14, flexWrap: 'wrap' }}>
 
-            {/* Selector de proyecto */}
             <select
               value={projectId}
-              onChange={e => { setProjectId(e.target.value); setNodoActivo(null) }}
+              onChange={e => {
+                setProjectId(e.target.value)
+                setNodoActivo(null)
+                setTareas([])
+                setDependencias([])
+              }}
               style={{ ...inp, width: 'auto', minWidth: 220, padding: '8px 12px',
                 fontSize: 13, fontWeight: 600 }}>
               <option value="">— Seleccionar proyecto —</option>
@@ -684,7 +562,7 @@ export default function ProgramaObraPage() {
               ))}
             </select>
 
-            {/* Zoom del Gantt */}
+            {/* Zoom Gantt */}
             <div style={{ display: 'flex', gap: 0, border: '1px solid #E5E7EB',
               borderRadius: 8, overflow: 'hidden' }}>
               {['Day','Week','Month'].map(m => (
@@ -698,7 +576,34 @@ export default function ProgramaObraPage() {
               ))}
             </div>
 
-            <div style={{ marginLeft: 'auto', display: 'flex', gap: 8 }}>
+            <div style={{ marginLeft: 'auto', display: 'flex', gap: 8, flexWrap: 'wrap' }}>
+
+              {/* Alerta secuencia estándar */}
+              {sinDeps && projectId && !sinPrograma && (
+                <button onClick={handleAplicarSecuenciaStd} disabled={calculando}
+                  style={{ display: 'flex', alignItems: 'center', gap: 6,
+                    padding: '7px 14px', borderRadius: 8,
+                    border: '1px solid #BFDBFE', backgroundColor: '#EFF6FF',
+                    color: '#1D4ED8', fontSize: 12, fontWeight: 600, cursor: 'pointer' }}>
+                  <Sparkles size={13} />
+                  Aplicar secuencia OBRIX
+                </button>
+              )}
+
+              {/* Exportar PDF */}
+              {!sinPrograma && projectId && (
+                <button onClick={handleExportarPDF} disabled={exportando}
+                  style={{ display: 'flex', alignItems: 'center', gap: 6,
+                    padding: '7px 14px', borderRadius: 8,
+                    border: '1px solid #E5E7EB', backgroundColor: '#F9FAFB',
+                    color: '#374151', fontSize: 12, cursor: 'pointer' }}>
+                  {exportando
+                    ? <RefreshCw size={13} style={{ animation: 'spin 1s linear infinite' }} />
+                    : <FileDown size={13} />}
+                  Exportar PDF
+                </button>
+              )}
+
               {sinPrograma && projectId && (
                 <button onClick={handleCalcular} disabled={calculando}
                   style={{ display: 'flex', alignItems: 'center', gap: 6,
@@ -711,6 +616,7 @@ export default function ProgramaObraPage() {
                   Generar programa
                 </button>
               )}
+
               {!sinPrograma && projectId && (
                 <button onClick={handleRecalcular} disabled={calculando}
                   style={{ display: 'flex', alignItems: 'center', gap: 6,
@@ -726,20 +632,35 @@ export default function ProgramaObraPage() {
             </div>
           </div>
 
+          {/* ── Alerta: sin dependencias configuradas ── */}
+          {sinDeps && !sinPrograma && projectId && (
+            <div style={{ display: 'flex', alignItems: 'center', gap: 10,
+              padding: '10px 14px', backgroundColor: '#EFF6FF',
+              border: '1px solid #BFDBFE', borderRadius: 10, marginBottom: 12 }}>
+              <Link2 size={15} color="#2563EB" style={{ flexShrink: 0 }} />
+              <p style={{ fontSize: 12, color: '#1E40AF', margin: 0 }}>
+                <strong>Sin dependencias configuradas.</strong> Las actividades no tienen
+                secuencia lógica definida — todos inician en la misma fecha.
+                Usa <strong>Aplicar secuencia OBRIX</strong> para aplicar la lógica
+                constructiva estándar, o configúralas manualmente haciendo clic en cada actividad.
+              </p>
+            </div>
+          )}
+
           {/* ── KPIs ── */}
           {kpis && (
             <div style={{ display: 'grid', gridTemplateColumns: 'repeat(5,1fr)',
               gap: 10, marginBottom: 14 }}>
               {[
-                { label: 'Avance global', value: fmtPct(kpis.pct_avance_global),
+                { label: 'Avance global',  value: fmtPct(kpis.pct_avance_global),
                   color: '#065F46', bg: '#F0FDF4', icon: TrendingUp },
-                { label: 'En tiempo', value: kpis.actividades_en_tiempo ?? 0,
+                { label: 'En tiempo',      value: kpis.actividades_en_tiempo ?? 0,
                   color: '#065F46', bg: '#F0FDF4', icon: CheckCircle },
-                { label: 'Atención', value: kpis.actividades_amber ?? 0,
+                { label: 'Atención',       value: kpis.actividades_amber ?? 0,
                   color: '#B45309', bg: '#FFFBEB', icon: Clock },
-                { label: 'Críticas', value: kpis.actividades_rojo ?? 0,
+                { label: 'Críticas',       value: kpis.actividades_rojo ?? 0,
                   color: '#991B1B', bg: '#FEF2F2', icon: AlertTriangle },
-                { label: 'Completadas', value: kpis.actividades_completadas ?? 0,
+                { label: 'Completadas',    value: kpis.actividades_completadas ?? 0,
                   color: '#1E40AF', bg: '#EFF6FF', icon: BarChart2 },
               ].map(k => {
                 const Icon = k.icon
@@ -762,14 +683,12 @@ export default function ProgramaObraPage() {
             </div>
           )}
 
-          {/* ── Área principal: Gantt + Panel ── */}
-          <div style={{ flex: 1, display: 'flex', gap: 0,
-            border: '1px solid #E5E7EB', borderRadius: 14,
+          {/* ── Área principal: Gantt ── */}
+          <div style={{ flex: 1, border: '1px solid #E5E7EB', borderRadius: 14,
             overflow: 'hidden', backgroundColor: '#fff', minHeight: 400 }}>
 
-            {/* Gantt */}
             <div style={{ flex: 1, overflow: 'auto', padding: '16px',
-              minWidth: 0, position: 'relative' }}>
+              minWidth: 0, position: 'relative', height: '100%' }}>
 
               {!projectId ? (
                 <div style={{ display: 'flex', flexDirection: 'column',
@@ -809,28 +728,21 @@ export default function ProgramaObraPage() {
                   </div>
                 </div>
               ) : (
-                <GanttChart
-                  tareas={tareas}
-                  viewMode={viewMode}
-                  onDateChange={handleDateChange}
-                  onTaskClick={handleTaskClick}
-                />
+                <>
+                  <p style={{ fontSize: 11, color: '#6B7280', margin: '0 0 8px' }}>
+                    💡 Haz <strong>clic en cualquier barra</strong> para gestionar
+                    dependencias, personal, maquinaria y herramientas de esa actividad.
+                  </p>
+                  <GanttChart
+                    tareas={tareas}
+                    dependencias={dependencias}
+                    viewMode={viewMode}
+                    onDateChange={handleDateChange}
+                    onTaskClick={handleTaskClick}
+                  />
+                </>
               )}
             </div>
-
-            {/* Panel lateral */}
-            {nodoActivoData && (
-              <div style={{ width: 320, borderLeft: '1px solid #E5E7EB',
-                display: 'flex', flexDirection: 'column', flexShrink: 0 }}>
-                <PanelActividad
-                  nodo={nodoActivoData}
-                  projectId={projectId}
-                  onClose={() => setNodoActivo(null)}
-                  onActualizar={cargar}
-                  toast={toast}
-                />
-              </div>
-            )}
           </div>
 
           {/* ── Alertas activas ── */}
@@ -877,6 +789,19 @@ export default function ProgramaObraPage() {
             </div>
           )}
         </div>
+
+        {/* ── Modal de Recursos ── */}
+        {nodoActivo && (
+          <ModalRecursos
+            nodo={nodoActivo}
+            projectId={projectId}
+            tareas={tareas}
+            onClose={() => setNodoActivo(null)}
+            onRecalcular={handleRecalcular}
+            toast={toast}
+          />
+        )}
+
       </MainLayout>
     </RequirePermission>
   )

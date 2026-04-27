@@ -19,6 +19,10 @@ import { ProjectsProgressReport } from './pages/reports/ProjectsProgressReport'
 import { NodeProgressReport }      from './pages/reports/NodeProgressReport'
 import ReportesFinancieros          from './pages/reports/ReportesFinancieros'
 
+// ── Admin ─────────────────────────────────────────────────────
+import RolesPage    from './pages/admin/RolesPage'
+import EmpresasPage from './pages/admin/EmpresasPage'
+
 // ── Relaciones Comerciales ────────────────────────────────────
 import { TercerosList } from './pages/relaciones/TercerosList'
 import { TerceroForm }  from './pages/relaciones/TerceroForm'
@@ -71,10 +75,10 @@ import ConsolidadoPage         from './pages/gastos/ConsolidadoPage'
 import AdminGastosConfigPage   from './pages/gastos/AdminGastosConfigPage'
 import ReposicionCajaChicaPage from './pages/gastos/ReposicionCajaChicaPage'
 
-// ── Seguridad de sesión ──────────────────────────────────────────────
+// ── Seguridad de sesión ───────────────────────────────────────
 import SesionGuard from './components/auth/SesionGuard'
 
-// ── OBRIX Master (panel privado del Owner — no aparece en Sidebar) ─
+// ── OBRIX Master ──────────────────────────────────────────────
 import ObrixMaster from './pages/master/ObrixMaster'
 
 // ── Comercial ─────────────────────────────────────────────────
@@ -83,6 +87,7 @@ import CotizacionPage         from './pages/comercial/CotizacionPage'
 import ContratoPage           from './pages/comercial/ContratoPage'
 import AnticipoPagoPage       from './pages/comercial/AnticipoPagoPage'
 import DashboardComercialPage from './pages/comercial/DashboardComercialPage'
+
 
 // ─── Ruta Protegida ──────────────────────────────────────────
 const ProtectedRoute = ({ children }) => {
@@ -251,10 +256,10 @@ function App() {
         <Route path="/movements" element={<ProtectedRoute><MovementHistory /></ProtectedRoute>} />
 
         {/* Reportes */}
-        <Route path="/reports"                   element={<ProtectedRoute><Reports                 /></ProtectedRoute>} />
-        <Route path="/reports/projects-progress" element={<ProtectedRoute><ProjectsProgressReport  /></ProtectedRoute>} />
-        <Route path="/reports/node-progress"     element={<ProtectedRoute><NodeProgressReport      /></ProtectedRoute>} />
-        <Route path="/reportes/financieros"      element={<ProtectedRoute><ReportesFinancieros     /></ProtectedRoute>} />
+        <Route path="/reports"                   element={<ProtectedRoute><Reports                /></ProtectedRoute>} />
+        <Route path="/reports/projects-progress" element={<ProtectedRoute><ProjectsProgressReport /></ProtectedRoute>} />
+        <Route path="/reports/node-progress"     element={<ProtectedRoute><NodeProgressReport     /></ProtectedRoute>} />
+        <Route path="/reportes/financieros"      element={<ProtectedRoute><ReportesFinancieros    /></ProtectedRoute>} />
 
         {/* Asistencia */}
         <Route path="/attendance" element={<ProtectedRoute><Attendance /></ProtectedRoute>} />
@@ -264,8 +269,10 @@ function App() {
         <Route path="/settings"         element={<ProtectedRoute><PlaceholderPage title="⚙️ Configuración" /></ProtectedRoute>} />
 
         {/* Admin */}
-        <Route path="/admin/users"        element={<ProtectedRoute><UsersAdmin           /></ProtectedRoute>} />
-        <Route path="/admin/gastos-config"element={<ProtectedRoute><AdminGastosConfigPage /></ProtectedRoute>} />
+        <Route path="/admin/users"         element={<ProtectedRoute><UsersAdmin           /></ProtectedRoute>} />
+        <Route path="/admin/roles"         element={<ProtectedRoute><RolesPage            /></ProtectedRoute>} />
+        <Route path="/admin/empresas"      element={<ProtectedRoute><EmpresasPage         /></ProtectedRoute>} />
+        <Route path="/admin/gastos-config" element={<ProtectedRoute><AdminGastosConfigPage /></ProtectedRoute>} />
 
         {/* Relaciones */}
         <Route path="/relaciones/terceros"       element={<ProtectedRoute><TercerosList  /></ProtectedRoute>} />
@@ -290,7 +297,7 @@ function App() {
         <Route path="/contabilidad/cuentas"       element={<ProtectedRoute><CatalogoCuentas         /></ProtectedRoute>} />
         <Route path="/contabilidad/electronica"   element={<ProtectedRoute><ContabilidadElectronica /></ProtectedRoute>} />
 
-        {/* ── Tesorería ────────────────────────────────────── */}
+        {/* Tesorería */}
         <Route path="/tesoreria"                  element={<ProtectedRoute><TesoreriaPage       /></ProtectedRoute>} />
         <Route path="/tesoreria/bancos"           element={<ProtectedRoute><BancosPage          /></ProtectedRoute>} />
         <Route path="/tesoreria/conciliacion"     element={<ProtectedRoute><ConciliacionPage    /></ProtectedRoute>} />
@@ -329,7 +336,7 @@ function App() {
         <Route path="/comercial/anticipo"         element={<ProtectedRoute><AnticipoPagoPage       /></ProtectedRoute>} />
         <Route path="/comercial/dashboard"        element={<ProtectedRoute><DashboardComercialPage /></ProtectedRoute>} />
 
-        {/* ── OBRIX Master — solo accesible con VITE_OBRIX_MASTER_EMAIL ── */}
+        {/* OBRIX Master */}
         <Route path="/obrix-master" element={<ObrixMaster />} />
 
         <Route path="/"  element={<ProtectedRoute><HomeRedirect /></ProtectedRoute>} />

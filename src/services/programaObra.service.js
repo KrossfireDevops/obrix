@@ -449,49 +449,6 @@ export async function resetearAjusteNodo(projectId, wbsId) {
 }
 
 // ─────────────────────────────────────────────────────────────
-// 6. DEPENDENCIAS ENTRE ACTIVIDADES
-// ─────────────────────────────────────────────────────────────
-
-export async function getDependencias(projectId) {
-  const { data, error } = await supabase
-    .from('obra_dependencias')
-    .select(`
-      *,
-      predecesor:predecesor_id ( id, nombre, codigo ),
-      sucesor:sucesor_id       ( id, nombre, codigo )
-    `)
-    .eq('project_id', projectId)
-  if (error) throw error
-  return data ?? []
-}
-
-export async function crearDependencia(projectId, predId, sucId, tipo = 'FS', lag = 0) {
-  const { companyId } = await getCtx()
-  const { data, error } = await supabase
-    .from('obra_dependencias')
-    .insert({
-      project_id:   projectId,
-      company_id:   companyId,
-      predecesor_id: predId,
-      sucesor_id:    sucId,
-      tipo,
-      lag_dias:      lag,
-    })
-    .select()
-    .single()
-  if (error) throw error
-  return data
-}
-
-export async function eliminarDependencia(depId) {
-  const { error } = await supabase
-    .from('obra_dependencias')
-    .delete()
-    .eq('id', depId)
-  if (error) throw error
-}
-
-// ─────────────────────────────────────────────────────────────
 // 7. CAPTURA DE AVANCE REAL
 // ─────────────────────────────────────────────────────────────
 
@@ -654,6 +611,410 @@ export async function getAlertasActivas(projectId) {
     .eq('fecha_calculo', new Date().toISOString().split('T')[0])
     .in('semaforo', ['amber', 'rojo'])
     .order('dias_atraso', { ascending: false })
+  if (error) throw error
+  return data ?? []
+}
+
+// ─────────────────────────────────────────────────────────────
+// 11. DEPENDENCIAS — CRUD + APLICAR ESTÁNDAR
+// ─────────────────────────────────────────────────────────────
+
+/**
+ * Aplica las dependencias estándar CIVIL+ELECT a un proyecto nuevo.
+ * Se llama desde ProjectWizard después de clonarWbsDesdeSistema.
+ */
+export async function aplicarDependenciasStd(projectId) {
+  const { data, error } = await supabase
+    .rpc('aplicar_dependencias_std', { p_project_id: projectId })
+  if (error) throw error
+  return data ?? 0
+}
+
+/**
+ * Obtiene todas las dependencias de un proyecto con nombres de nodos.
+ */
+export async function getDependencias(projectId) {
+  const { data, error } = await supabase
+    .from('obra_dependencias')
+    .select(`
+      *,
+      predecesor:predecesor_id ( id, nombre, codigo ),
+      sucesor:sucesor_id       ( id, nombre, codigo )
+    `)
+    .eq('project_id', projectId)
+  if (error) throw error
+  return data ?? []
+}
+
+/**
+ * Obtiene dependencias de un nodo específico (como predecesor o sucesor).
+ */
+export async function getDependenciasNodo(projectId, wbsId) {
+  const { data, error } = await supabase
+    .from('obra_dependencias')
+    .select(`
+      *,
+      predecesor:predecesor_id ( id, nombre, codigo ),
+      sucesor:sucesor_id       ( id, nombre, codigo )
+    `)
+    .eq('project_id', projectId)
+    .or(`predecesor_id.eq.${wbsId},sucesor_id.eq.${wbsId}`)
+  if (error) throw error
+  return data ?? []
+}
+
+export async function crearDependencia(projectId, predId, sucId, tipo = 'FS', lag = 0) {
+  const { companyId } = await getCtx()
+  const { data, error } = await supabase
+    .from('obra_dependencias')
+    .insert({
+      project_id:    projectId,
+      company_id:    companyId,
+      predecesor_id: predId,
+      sucesor_id:    sucId,
+      tipo,
+      lag_dias:      lag,
+    })
+    .select()
+    .single()
+  if (error) throw error
+  return data
+}
+
+export async function actualizarDependencia(depId, tipo, lag) {
+  const { data, error } = await supabase
+    .from('obra_dependencias')
+    .update({ tipo, lag_dias: lag })
+    .eq('id', depId)
+    .select()
+    .single()
+  if (error) throw error
+  return data
+}
+
+export async function eliminarDependencia(depId) {
+  const { error } = await supabase
+    .from('obra_dependencias')
+    .delete()
+    .eq('id', depId)
+  if (error) throw error
+}
+
+// ─────────────────────────────────────────────────────────────
+// 12. MAQUINARIA — CATÁLOGO Y ASIGNACIÓN
+// ─────────────────────────────────────────────────────────────
+
+export async function getMaquinariaCatalogo() {
+  const { companyId } = await getCtx()
+  const { data, error } = await supabase
+    .from('obra_maquinaria_catalogo')
+    .select('*')
+    .eq('company_id', companyId)
+    .eq('is_active', true)
+    .order('tipo', { ascending: true })
+    .order('nombre', { ascending: true })
+  if (error) throw error
+  return data ?? []
+}
+
+export async function upsertMaquinariaCatalogo(datos) {
+  const { companyId } = await getCtx()
+  const { data, error } = await supabase
+    .from('obra_maquinaria_catalogo')
+    .upsert({
+      ...datos,
+      company_id: companyId,
+      updated_at: new Date().toISOString(),
+    }, { onConflict: 'id' })
+    .select()
+    .single()
+  if (error) throw error
+  return data
+}
+
+export async function getMaquinariaAsignada(projectId, wbsId) {
+  const { data, error } = await supabase
+    .from('obra_asig_maquinaria')
+    .select(`
+      *,
+      maquinaria:maquinaria_id (
+        id, nombre, tipo, costo_hora, unidad_cobro
+      )
+    `)
+    .eq('project_id', projectId)
+    .eq('wbs_id', wbsId)
+    .order('created_at', { ascending: false })
+  if (error) throw error
+  return data ?? []
+}
+
+export async function asignarMaquinaria(projectId, wbsId, datos) {
+  const { companyId, userId } = await getCtx()
+  const { data, error } = await supabase
+    .from('obra_asig_maquinaria')
+    .insert({
+      project_id:          projectId,
+      wbs_id:              wbsId,
+      company_id:          companyId,
+      maquinaria_id:       datos.maquinaria_id,
+      fecha_inicio:        datos.fecha_inicio || null,
+      fecha_fin:           datos.fecha_fin    || null,
+      horas_dia:           parseFloat(datos.horas_dia) || 8,
+      cantidad:            parseInt(datos.cantidad)    || 1,
+      costo_hora_override: datos.costo_hora_override
+                             ? parseFloat(datos.costo_hora_override) : null,
+      notas:               datos.notas        || null,
+      asignado_por:        userId,
+    })
+    .select(`*, maquinaria:maquinaria_id(id, nombre, tipo, costo_hora, unidad_cobro)`)
+    .single()
+  if (error) throw error
+  return data
+}
+
+export async function retirarMaquinaria(asigId) {
+  const { error } = await supabase
+    .from('obra_asig_maquinaria')
+    .delete()
+    .eq('id', asigId)
+  if (error) throw error
+}
+
+export async function actualizarMaquinariaAsig(asigId, cambios) {
+  const { data, error } = await supabase
+    .from('obra_asig_maquinaria')
+    .update({ ...cambios, updated_at: new Date().toISOString() })
+    .eq('id', asigId)
+    .select(`*, maquinaria:maquinaria_id(id, nombre, tipo, costo_hora, unidad_cobro)`)
+    .single()
+  if (error) throw error
+  return data
+}
+
+// ─────────────────────────────────────────────────────────────
+// 13. HERRAMIENTAS ESPECIALES — CATÁLOGO Y ASIGNACIÓN
+// ─────────────────────────────────────────────────────────────
+
+export async function getHerramientasCatalogo() {
+  const { companyId } = await getCtx()
+  const { data, error } = await supabase
+    .from('obra_herramientas_catalogo')
+    .select('*')
+    .eq('company_id', companyId)
+    .eq('is_active', true)
+    .order('tipo', { ascending: true })
+    .order('nombre', { ascending: true })
+  if (error) throw error
+  return data ?? []
+}
+
+export async function getHerramientasAsignadas(projectId, wbsId) {
+  const { data, error } = await supabase
+    .from('obra_asig_herramientas')
+    .select(`
+      *,
+      herramienta:herramienta_id (
+        id, nombre, tipo, costo_dia, unidad_cobro
+      )
+    `)
+    .eq('project_id', projectId)
+    .eq('wbs_id', wbsId)
+    .order('created_at', { ascending: false })
+  if (error) throw error
+  return data ?? []
+}
+
+export async function asignarHerramienta(projectId, wbsId, datos) {
+  const { companyId, userId } = await getCtx()
+  const { data, error } = await supabase
+    .from('obra_asig_herramientas')
+    .insert({
+      project_id:         projectId,
+      wbs_id:             wbsId,
+      company_id:         companyId,
+      herramienta_id:     datos.herramienta_id,
+      fecha_inicio:       datos.fecha_inicio || null,
+      fecha_fin:          datos.fecha_fin    || null,
+      cantidad:           parseInt(datos.cantidad) || 1,
+      costo_dia_override: datos.costo_dia_override
+                            ? parseFloat(datos.costo_dia_override) : null,
+      notas:              datos.notas        || null,
+      asignado_por:       userId,
+    })
+    .select(`*, herramienta:herramienta_id(id, nombre, tipo, costo_dia, unidad_cobro)`)
+    .single()
+  if (error) throw error
+  return data
+}
+
+export async function retirarHerramienta(asigId) {
+  const { error } = await supabase
+    .from('obra_asig_herramientas')
+    .delete()
+    .eq('id', asigId)
+  if (error) throw error
+}
+
+// ─────────────────────────────────────────────────────────────
+// 14. PRECIOS POR ACTIVIDAD (Destajo / Fijo)
+// ─────────────────────────────────────────────────────────────
+
+/**
+ * Obtiene el precio vigente para una actividad en una fecha dada.
+ */
+export async function getPrecioActividad(wbsId, fecha = null) {
+  const hoy = fecha || new Date().toISOString().split('T')[0]
+  const { data, error } = await supabase
+    .from('obra_precios_actividad')
+    .select('*')
+    .eq('wbs_id', wbsId)
+    .lte('fecha_inicio', hoy)
+    .or(`fecha_fin.is.null,fecha_fin.gte.${hoy}`)
+    .order('fecha_inicio', { ascending: false })
+    .limit(1)
+    .maybeSingle()
+  if (error) throw error
+  return data
+}
+
+/**
+ * Obtiene historial completo de precios de una actividad.
+ */
+export async function getHistorialPrecios(wbsId) {
+  const { data, error } = await supabase
+    .from('obra_precios_actividad')
+    .select('*')
+    .eq('wbs_id', wbsId)
+    .order('fecha_inicio', { ascending: false })
+  if (error) throw error
+  return data ?? []
+}
+
+export async function guardarPrecioActividad(wbsId, projectId, datos) {
+  const { companyId, userId } = await getCtx()
+
+  // Cerrar precio anterior si existe y no tiene fecha_fin
+  if (datos.fecha_inicio) {
+    const diaAnterior = new Date(datos.fecha_inicio)
+    diaAnterior.setDate(diaAnterior.getDate() - 1)
+    await supabase
+      .from('obra_precios_actividad')
+      .update({ fecha_fin: diaAnterior.toISOString().split('T')[0] })
+      .eq('wbs_id', wbsId)
+      .is('fecha_fin', null)
+      .lt('fecha_inicio', datos.fecha_inicio)
+  }
+
+  const { data, error } = await supabase
+    .from('obra_precios_actividad')
+    .insert({
+      project_id:      projectId,
+      wbs_id:          wbsId,
+      company_id:      companyId,
+      tipo_pago:       datos.tipo_pago,
+      precio_unitario: datos.precio_unitario
+                         ? parseFloat(datos.precio_unitario) : null,
+      unidad_medida:   datos.unidad_medida    || null,
+      precio_dia:      datos.precio_dia
+                         ? parseFloat(datos.precio_dia) : null,
+      fecha_inicio:    datos.fecha_inicio || new Date().toISOString().split('T')[0],
+      fecha_fin:       datos.fecha_fin    || null,
+      notas:           datos.notas        || null,
+      configurado_por: userId,
+    })
+    .select()
+    .single()
+  if (error) throw error
+  return data
+}
+
+// ─────────────────────────────────────────────────────────────
+// 15. CIERRES DE ETAPA
+// ─────────────────────────────────────────────────────────────
+
+export async function getCierresEtapa(projectId, wbsId = null) {
+  let q = supabase
+    .from('obra_cierres_etapa')
+    .select(`
+      *,
+      cerrado_por:cerrado_por ( full_name )
+    `)
+    .eq('project_id', projectId)
+    .order('fecha_inicio_periodo', { ascending: false })
+
+  if (wbsId) q = q.eq('wbs_id', wbsId)
+
+  const { data, error } = await q
+  if (error) throw error
+  return data ?? []
+}
+
+export async function crearCierreEtapa(projectId, wbsId, datos) {
+  const { companyId, userId } = await getCtx()
+
+  // Calcular costo MO fijo desde personal asignado si no viene
+  let costoMoFijo = parseFloat(datos.costo_mo_fijo) || 0
+  let costoMoDestajo = parseFloat(datos.costo_mo_destajo) || 0
+
+  // Usar función SQL de cálculo para enriquecer si no viene calculado
+  if (!datos.skip_calculo) {
+    try {
+      const { data: calc } = await supabase.rpc('calcular_costo_actividad', {
+        p_wbs_id:     wbsId,
+        p_project_id: projectId,
+        p_fecha_ini:  datos.fecha_inicio_periodo,
+        p_fecha_fin:  datos.fecha_fin_periodo,
+      })
+      if (calc?.[0]) {
+        costoMoFijo      = costoMoFijo      || parseFloat(calc[0].costo_mo_fijo)      || 0
+        costoMoDestajo   = costoMoDestajo   || parseFloat(calc[0].costo_mo_destajo)   || 0
+      }
+    } catch (_) { /* silenciar — el usuario puede haberlo capturado manualmente */ }
+  }
+
+  const { data, error } = await supabase
+    .from('obra_cierres_etapa')
+    .insert({
+      project_id:           projectId,
+      wbs_id:               wbsId,
+      company_id:           companyId,
+      fecha_inicio_periodo: datos.fecha_inicio_periodo,
+      fecha_fin_periodo:    datos.fecha_fin_periodo,
+      costo_mo_fijo:        costoMoFijo,
+      costo_mo_destajo:     costoMoDestajo,
+      cantidad_avance:      datos.cantidad_avance
+                              ? parseFloat(datos.cantidad_avance) : null,
+      unidad_avance:        datos.unidad_avance    || null,
+      costo_maquinaria:     parseFloat(datos.costo_maquinaria)    || 0,
+      detalle_maquinaria:   datos.detalle_maquinaria   || null,
+      costo_herramientas:   parseFloat(datos.costo_herramientas)  || 0,
+      detalle_herramientas: datos.detalle_herramientas || null,
+      pct_avance_periodo:   datos.pct_avance_periodo
+                              ? parseFloat(datos.pct_avance_periodo) : null,
+      notas:                datos.notas  || null,
+      cerrado_por:          userId,
+    })
+    .select(`*, cerrado_por:cerrado_por(full_name)`)
+    .single()
+  if (error) throw error
+  return data
+}
+
+/**
+ * Obtiene resumen de costos de un proyecto agrupado por actividad.
+ */
+export async function getResumenCostosProyecto(projectId) {
+  const { data, error } = await supabase
+    .from('obra_cierres_etapa')
+    .select(`
+      wbs_id,
+      nodo:wbs_id ( nombre, codigo, nivel_profundidad ),
+      costo_mo_fijo, costo_mo_destajo,
+      costo_maquinaria, costo_herramientas, costo_total,
+      fecha_inicio_periodo, fecha_fin_periodo
+    `)
+    .eq('project_id', projectId)
+    .order('fecha_inicio_periodo', { ascending: true })
   if (error) throw error
   return data ?? []
 }

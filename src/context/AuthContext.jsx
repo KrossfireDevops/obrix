@@ -1,13 +1,7 @@
 // src/context/AuthContext.jsx
-// v2.0 — Abril 2026
-// Cambios:
-//   - loadUserProfile ahora también carga company_settings
-//     para obtener los 3 logos de la empresa
-//   - Expone `empresaConfig` en el contexto con:
-//       logo_url            → Logo Sistema (Login + Sidebar)
-//       logo_documentos_url → Logo PDFs
-//       logo_alternativo_url→ Logo especial por formato
-//       razon_social, rfc   → Para mostrar en UI
+// v2.1 — Abril 2026
+// Fix: onAuthStateChange ignora eventos TOKEN_REFRESHED durante
+//      creación de usuarios para no resetear la sesión del admin
 
 import { createContext, useContext, useEffect, useState, useRef } from 'react'
 import { supabase } from '../config/supabase'
@@ -23,29 +17,38 @@ export const useAuth = () => {
 export const AuthProvider = ({ children }) => {
   const [user,          setUser]          = useState(null)
   const [userProfile,   setUserProfile]   = useState(null)
-  const [empresaConfig, setEmpresaConfig] = useState(null)  // ← NUEVO
+  const [empresaConfig, setEmpresaConfig] = useState(null)
   const [loading,       setLoading]       = useState(true)
   const initialized                       = useRef(false)
+  // Guardar el userId del admin para detectar cambios de sesión no deseados
+  const currentUserId                     = useRef(null)
 
-  // ── Cargar perfil + config de empresa ───────────────────────────────
   const loadUserProfile = async (userId) => {
     if (!userId) {
       setUserProfile(null)
       setEmpresaConfig(null)
+      currentUserId.current = null
       return
     }
+
+    currentUserId.current = userId
+
     try {
-      // 1. Cargar perfil del usuario
       const { data: profile, error } = await supabase
         .from('users_profiles')
         .select('*')
         .eq('id', userId)
         .single()
 
-      console.log('[AuthContext] loadUserProfile result:', { data: profile, error })
+      console.log('[AUTH] userId:', userId)
+      console.log('[AUTH] profile:', profile)
+      console.log('[AUTH] error:', error)
+
+      // Verificar que el userId no cambió mientras esperábamos
+      if (currentUserId.current !== userId) return
+
       setUserProfile(profile || null)
 
-      // 2. Cargar config de empresa (logos + datos fiscales básicos)
       if (profile?.company_id) {
         try {
           const { data: settings } = await supabase
@@ -62,8 +65,6 @@ export const AuthProvider = ({ children }) => {
 
           setEmpresaConfig(settings || null)
 
-          // Guardar logo en localStorage para que Login.jsx
-          // lo muestre en la próxima visita (antes de autenticarse)
           try {
             if (settings?.logo_url) {
               localStorage.setItem('obrix_empresa_logo', settings.logo_url)
@@ -71,21 +72,17 @@ export const AuthProvider = ({ children }) => {
               localStorage.removeItem('obrix_empresa_logo')
             }
           } catch (_) {}
-
         } catch (_) {
-          // Si falla la carga de logos, no romper la sesión
           setEmpresaConfig(null)
         }
       }
     } catch (err) {
-      console.log('[AuthContext] loadUserProfile catch:', err)
+      console.error('[AuthContext] loadUserProfile error:', err)
       setUserProfile(null)
       setEmpresaConfig(null)
     }
   }
 
-  // ── Función para refrescar solo la config de empresa ────────────────
-  // Se llama desde CompanySettings después de guardar logos nuevos
   const refrescarEmpresaConfig = async () => {
     if (!userProfile?.company_id) return
     try {
@@ -104,31 +101,27 @@ export const AuthProvider = ({ children }) => {
     } catch (_) {}
   }
 
-  // ── Login ────────────────────────────────────────────────────────────
   const login = async (email, password) => {
     const result = await supabase.auth.signInWithPassword({ email, password })
     if (result.error) throw result.error
     return result.data
   }
 
-  // ── Logout ───────────────────────────────────────────────────────────
   const logout = async () => {
     const result = await supabase.auth.signOut()
     if (result.error) throw result.error
     setUser(null)
     setUserProfile(null)
     setEmpresaConfig(null)
-    // Limpiar logo guardado para que el Login muestre OBRIX
+    currentUserId.current = null
     try { localStorage.removeItem('obrix_empresa_logo') } catch (_) {}
   }
 
-  // ── Inicializar sesión ───────────────────────────────────────────────
   useEffect(() => {
     let mounted = true
 
     const initAuth = async () => {
       const { data: { session } } = await supabase.auth.getSession()
-
       if (!mounted) return
 
       if (session?.user) {
@@ -147,8 +140,30 @@ export const AuthProvider = ({ children }) => {
         if (!initialized.current) return
         if (!mounted) return
 
+        const incomingUserId = session?.user?.id ?? null
+
+        // PROTECCIÓN: Si el evento es SIGNED_IN con un userId DIFERENTE
+        // al admin actual, significa que se creó un nuevo usuario y
+        // Supabase generó un token para él — ignorar ese evento
+        if (
+          event === 'SIGNED_IN' &&
+          currentUserId.current &&
+          incomingUserId &&
+          incomingUserId !== currentUserId.current
+        ) {
+          console.warn('[AuthContext] Ignorando SIGNED_IN de usuario diferente al admin actual')
+          return
+        }
+
         setUser(session?.user ?? null)
-        await loadUserProfile(session?.user?.id ?? null)
+
+        if (incomingUserId) {
+          await loadUserProfile(incomingUserId)
+        } else {
+          setUserProfile(null)
+          setEmpresaConfig(null)
+        }
+
         setLoading(false)
       }
     )
@@ -162,8 +177,8 @@ export const AuthProvider = ({ children }) => {
   const contextValue = {
     user,
     userProfile,
-    empresaConfig,          // ← NUEVO: logos + razon_social + rfc
-    refrescarEmpresaConfig, // ← NUEVO: para refrescar tras guardar logos
+    empresaConfig,
+    refrescarEmpresaConfig,
     loading,
     login,
     logout,

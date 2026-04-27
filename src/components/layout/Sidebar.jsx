@@ -1,9 +1,12 @@
 // src/components/layout/Sidebar.jsx
-// v3.3 — Abril 2026
-// Cambios vs v3.2:
-//   - Logo dinámico: lee logo_url desde empresaConfig (AuthContext)
-//     Si la empresa tiene logo configurado lo muestra,
-//     si no, fallback al logo de OBRIX (Obrix_V3_web.png)
+// v3.4 — Abril 2026
+// Cambios vs v3.3:
+//   - Eliminado MODULOS_LIBRES bypass — todos los módulos
+//     usan canAccess() real desde permissions.config.js
+//   - Secciones completas se ocultan si ningún hijo es accesible
+//   - Sub-módulos individuales se ocultan si el usuario no tiene acceso
+//   - Agregados: Roles y Permisos (/admin/roles) y Empresas (/admin/empresas)
+//     visibles solo para super_admin
 
 import { useState, useEffect, useRef } from 'react'
 import { NavLink, useLocation } from 'react-router-dom'
@@ -18,13 +21,14 @@ import {
   CalendarDays, GanttChartSquare, Receipt, BadgeDollarSign,
   PiggyBank, BarChart3, SlidersHorizontal, DollarSign,
   Wallet, GripVertical, Home,
-  Landmark, GitMerge, FilePlus2, Stamp,
+  Landmark, GitMerge, FilePlus2, Stamp, ShieldCheck,
 } from 'lucide-react'
-import { ClipboardCheck, Shield, Zap, FileKey2, ShieldCheck } from 'lucide-react'
+import { ClipboardCheck, Shield, Zap, FileKey2 } from 'lucide-react'
 import UserPreferencesModal from '../UserPreferencesModal'
 
 // ─────────────────────────────────────────────────────────────
 // ESTRUCTURA DEL MENÚ
+// Cada item tiene module: que se evalúa contra canAccess()
 // ─────────────────────────────────────────────────────────────
 const MENU_STRUCTURE = [
   {
@@ -32,14 +36,16 @@ const MENU_STRUCTURE = [
     icon: LayoutDashboard, module: 'dashboard', standalone: true,
   },
 
+  // ── OPERACIÓN DE OBRA ─────────────────────────────────────
   { type: 'section', name: 'OPERACIÓN DE OBRA', icon: FolderOpen },
-  { type: 'item', name: 'Proyectos',        path: '/projects',         icon: FolderOpen,       module: 'projects'     },
-  { type: 'item', name: 'Árbol de Proyecto',path: '/project-tree',     icon: GitBranch,        module: 'project_tree' },
-  { type: 'item', name: 'Avances de Obra',  path: '/obra/avances',     icon: TrendingUp,       module: 'projects'     },
-  { type: 'item', name: 'Calendarios',      path: '/obra/calendarios', icon: CalendarDays,     module: 'projects'     },
-  { type: 'item', name: 'Programa de Obra', path: '/obra/programa',    icon: GanttChartSquare, module: 'projects'     },
-  { type: 'item', name: 'Asistencia',       path: '/attendance',       icon: ClipboardCheck,   module: 'attendance'   },
+  { type: 'item', name: 'Proyectos',        path: '/projects',         icon: FolderOpen,       module: 'projects'  },
+  { type: 'item', name: 'Árbol de Proyecto',path: '/project-tree',     icon: GitBranch,        module: 'projects'  },
+  { type: 'item', name: 'Avances de Obra',  path: '/obra/avances',     icon: TrendingUp,       module: 'projects'  },
+  { type: 'item', name: 'Calendarios',      path: '/obra/calendarios', icon: CalendarDays,     module: 'projects'  },
+  { type: 'item', name: 'Programa de Obra', path: '/obra/programa',    icon: GanttChartSquare, module: 'projects'  },
+  { type: 'item', name: 'Asistencia',       path: '/attendance',       icon: ClipboardCheck,   module: 'attendance'},
 
+  // ── PERSONAL ──────────────────────────────────────────────
   { type: 'section', name: 'PERSONAL', icon: HardHat },
   {
     type: 'group', name: 'Gestión de Personal', icon: HardHat, module: 'personal',
@@ -49,16 +55,18 @@ const MENU_STRUCTURE = [
     ],
   },
 
+  // ── MATERIALES ────────────────────────────────────────────
   { type: 'section', name: 'MATERIALES', icon: Package },
   { type: 'item', name: 'Inventario', path: '/inventory', icon: Package, module: 'inventory' },
   {
     type: 'group', name: 'Gestión de Materiales', icon: ClipboardList, module: 'movements',
     children: [
-      { name: 'Solicitudes de Material', path: '/materials/requests', icon: FileText, module: 'movements' },
-      { name: 'Maestro de Materiales',   path: '/materials/catalog',  icon: BookOpen, module: 'materials' },
+      { name: 'Solicitudes de Material', path: '/materials/requests', icon: FileText, module: 'movements'  },
+      { name: 'Maestro de Materiales',   path: '/materials/catalog',  icon: BookOpen, module: 'materials'  },
     ],
   },
 
+  // ── COMPRAS ───────────────────────────────────────────────
   { type: 'section', name: 'COMPRAS', icon: ShoppingCart },
   { type: 'item', name: 'Proveedores', path: '/compras/proveedores', icon: Store, module: 'compras' },
   {
@@ -70,13 +78,15 @@ const MENU_STRUCTURE = [
     ],
   },
 
+  // ── GASTOS ────────────────────────────────────────────────
   { type: 'section', name: 'GASTOS', icon: Receipt },
-  { type: 'item', name: 'Mis Gastos',   path: '/gastos/mis-gastos',      icon: Receipt,        module: 'gastos' },
+  { type: 'item', name: 'Mis Gastos',   path: '/gastos/mis-gastos',      icon: Receipt,         module: 'gastos' },
   { type: 'item', name: 'Aprobaciones', path: '/gastos/aprobaciones',    icon: BadgeDollarSign, module: 'gastos' },
   { type: 'item', name: 'Reembolsos',   path: '/gastos/reembolsos',      icon: PiggyBank,       module: 'gastos' },
   { type: 'item', name: 'Caja Chica',   path: '/gastos/reposicion-caja', icon: Wallet,          module: 'gastos' },
   { type: 'item', name: 'Consolidado',  path: '/gastos/consolidado',     icon: BarChart3,       module: 'gastos' },
 
+  // ── COMERCIAL ─────────────────────────────────────────────
   { type: 'section', name: 'COMERCIAL', icon: TrendingUp },
   { type: 'item', name: 'Pipeline',            path: '/comercial/pipeline',         icon: TrendingUp, module: 'comercial' },
   { type: 'item', name: 'Nueva Cotización',    path: '/comercial/cotizacion/nueva', icon: FileText,   module: 'comercial' },
@@ -84,10 +94,12 @@ const MENU_STRUCTURE = [
   { type: 'item', name: 'Anticipo / Proyecto', path: '/comercial/anticipo',         icon: Zap,        module: 'comercial' },
   { type: 'item', name: 'Dashboard Comercial', path: '/comercial/dashboard',        icon: BarChart2,  module: 'comercial' },
 
+  // ── FACTURACIÓN ───────────────────────────────────────────
   { type: 'section', name: 'FACTURACIÓN', icon: Stamp },
   { type: 'item', name: 'Mis Facturas',  path: '/facturacion',       icon: ReceiptText, module: 'facturacion' },
   { type: 'item', name: 'Nueva Factura', path: '/facturacion/nueva', icon: FilePlus2,   module: 'facturacion' },
 
+  // ── TESORERÍA ─────────────────────────────────────────────
   { type: 'section', name: 'TESORERÍA', icon: Landmark },
   { type: 'item', name: 'Posición de Caja',   path: '/tesoreria',             icon: Landmark,     module: 'tesoreria' },
   { type: 'item', name: 'Bancos',             path: '/tesoreria/bancos',       icon: Building2,    module: 'tesoreria' },
@@ -95,6 +107,7 @@ const MENU_STRUCTURE = [
   { type: 'item', name: 'Cuentas por Cobrar', path: '/tesoreria/cxc',          icon: TrendingUp,   module: 'tesoreria' },
   { type: 'item', name: 'Cuentas por Pagar',  path: '/tesoreria/cxp',          icon: TrendingDown, module: 'tesoreria' },
 
+  // ── RELACIONES COMERCIALES ───────────────────────────────
   { type: 'section', name: 'RELACIONES COMERCIALES', icon: Handshake },
   {
     type: 'group', name: 'Clientes y Proveedores', icon: Handshake, module: 'fiscal',
@@ -103,6 +116,7 @@ const MENU_STRUCTURE = [
     ],
   },
 
+  // ── FINANZAS ─────────────────────────────────────────────
   { type: 'section', name: 'FINANZAS', icon: Scale },
   {
     type: 'group', name: 'Gestión Financiera', icon: Scale, module: 'fiscal',
@@ -116,15 +130,19 @@ const MENU_STRUCTURE = [
     ],
   },
 
+  // ── ANÁLISIS Y REPORTES ──────────────────────────────────
   { type: 'section', name: 'ANÁLISIS Y REPORTES', icon: BarChart2 },
   { type: 'item', name: 'Reportes',             path: '/reports',                   icon: BarChart2,  module: 'reports' },
   { type: 'item', name: 'Avance de Proyectos',  path: '/reports/projects-progress', icon: TrendingUp, module: 'reports' },
   { type: 'item', name: 'Avance por Nodo',      path: '/reports/node-progress',     icon: GitBranch,  module: 'reports' },
   { type: 'item', name: 'Reportes Financieros', path: '/reportes/financieros',      icon: DollarSign, module: 'reports' },
 
+  // ── ADMINISTRACIÓN ───────────────────────────────────────
   { type: 'section', name: 'ADMINISTRACIÓN', icon: Settings },
-  { type: 'item', name: 'Usuarios',       path: '/admin/users',         icon: Users,             module: 'users_admin'  },
-  { type: 'item', name: 'Config. Gastos', path: '/admin/gastos-config', icon: SlidersHorizontal, module: 'gastos_admin' },
+  { type: 'item', name: 'Usuarios',        path: '/admin/users',         icon: Users,             module: 'users_admin'  },
+  { type: 'item', name: 'Roles y Permisos',path: '/admin/roles',         icon: ShieldCheck,       module: 'users_admin'  },
+  { type: 'item', name: 'Empresas',        path: '/admin/empresas',      icon: Building2,         module: 'users_admin', soloSuperAdmin: true },
+  { type: 'item', name: 'Config. Gastos',  path: '/admin/gastos-config', icon: SlidersHorizontal, module: 'gastos_admin' },
   {
     type: 'group', name: 'Configuración', icon: Settings, module: 'settings',
     children: [
@@ -260,7 +278,7 @@ const SectionHeader = ({ name, icon: Icon, isOpen, isActive, onToggle }) => (
 // SIDEBAR PRINCIPAL
 // ─────────────────────────────────────────────────────────────
 export const Sidebar = ({ isOpen = false, onClose = () => {} }) => {
-  const { canAccess } = usePermission()
+  const { canAccess, isSuperAdmin } = usePermission()
   const { empresaConfig } = useAuth()  // ← NUEVO: logo dinámico
   const location = useLocation()
   const [showPrefs, setShowPrefs] = useState(false)
@@ -341,11 +359,14 @@ export const Sidebar = ({ isOpen = false, onClose = () => {} }) => {
 
   const [search, setSearch] = useState('')
 
-  const MODULOS_LIBRES = new Set([
-    'fiscal','compras','personal','gastos','gastos_admin',
-    'comercial','settings','facturacion','tesoreria',
-  ])
-  const canAccessFiscal = (module) => MODULOS_LIBRES.has(module) ? true : canAccess(module)
+  // Usar canAccess directamente — sin bypass por módulo
+  // super_admin siempre retorna true desde usePermission
+  // Los demás roles usan permissions.config.js
+  const chkAccess = (module, soloSuperAdmin = false) => {
+    if (soloSuperAdmin) return isSuperAdmin  // Exclusivo super_admin
+    if (!module) return true
+    return canAccess(module)
+  }
 
   const renderMenu = () => {
     if (search) {
@@ -358,7 +379,7 @@ export const Sidebar = ({ isOpen = false, onClose = () => {} }) => {
             item.children.some(c => c.name.toLowerCase().includes(search.toLowerCase()))
           return false
         })
-        .filter(item => canAccessFiscal(item.module))
+        .filter(item => chkAccess(item.module, item.soloSuperAdmin))
         .map((item, idx) => renderItem(item, idx))
     }
 
@@ -377,20 +398,20 @@ export const Sidebar = ({ isOpen = false, onClose = () => {} }) => {
 
     return sections.map(({ section, items }, sIdx) => {
       if (!section) {
-        return items.filter(i => canAccessFiscal(i.module)).map((item, idx) => renderItem(item, `standalone-${idx}`))
+        return items.filter(i => chkAccess(i.module, i.soloSuperAdmin)).map((item, idx) => renderItem(item, `standalone-${idx}`))
       }
       const isOpen   = !!openSections[section.name]
       const isActive = activeSectionName === section.name
       const hasAccess = items.some(i =>
-        i.type === 'item'  ? canAccessFiscal(i.module) :
-        i.type === 'group' ? i.children.some(c => canAccessFiscal(c.module)) : false
+        i.type === 'item'  ? chkAccess(i.module, i.soloSuperAdmin) :
+        i.type === 'group' ? i.children.some(c => chkAccess(c.module, c.soloSuperAdmin)) : false
       )
       if (!hasAccess) return null
       return (
         <div key={`section-${sIdx}`}>
           <SectionHeader name={section.name} icon={section.icon} isOpen={isOpen} isActive={isActive} onToggle={() => toggleSection(section.name)} />
           <div style={{ overflow: 'hidden', maxHeight: isOpen ? '2000px' : '0px', transition: 'max-height 0.3s ease', paddingLeft: '4px' }}>
-            {items.filter(i => canAccessFiscal(i.module)).map((item, idx) => renderItem(item, `${section.name}-${idx}`))}
+            {items.filter(i => chkAccess(i.module, i.soloSuperAdmin)).map((item, idx) => renderItem(item, `${section.name}-${idx}`))}
           </div>
         </div>
       )
@@ -399,8 +420,8 @@ export const Sidebar = ({ isOpen = false, onClose = () => {} }) => {
 
   const renderItem = (item, key) => {
     if (item.type === 'group') {
-      if (!canAccessFiscal(item.module)) return null
-      return <MenuGroup key={`group-${key}`} group={item} canAccess={canAccessFiscal} onClose={onClose} openGroup={openGroup} setOpenGroup={setOpenGroup} toggleFavorite={toggleFavorite} favorites={favorites} />
+      if (!chkAccess(item.module, item.soloSuperAdmin)) return null
+      return <MenuGroup key={`group-${key}`} group={item} canAccess={chkAccess} onClose={onClose} openGroup={openGroup} setOpenGroup={setOpenGroup} toggleFavorite={toggleFavorite} favorites={favorites} />
     }
     const isFav = favorites.some(f => f.path === item.path)
     return (

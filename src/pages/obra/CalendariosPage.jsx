@@ -623,7 +623,6 @@ const PanelDetalle = ({ cal, onAgregar, onEliminar, onPrecargarLFT, toast }) => 
               color: tab === t.id ? '#2563EB' : '#6B7280',
               borderBottom: `2px solid ${tab === t.id ? '#2563EB' : 'transparent'}`,
               background: 'none', border: 'none',
-              borderBottom: `2px solid ${tab === t.id ? '#2563EB' : 'transparent'}`,
               cursor: 'pointer', transition: 'all 0.15s',
             }}>
             {t.label}

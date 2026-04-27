@@ -1,16 +1,19 @@
 // src/config/permissions.config.js
-// ============================================================================
-// MATRIZ COMPLETA DE PERMISOS POR ROL
-// Estructura: módulo → acciones → roles que pueden ejecutarlas
-// ============================================================================
+// v2.0 — Abril 2026
+// Actualizado con todos los módulos de OBRIX:
+// Comercial, Facturación, Tesorería, Contabilidad, Gastos,
+// Compras, Personal, Programa de Obra, Calendarios, Relaciones
 
+// ============================================================================
+// ROLES
+// ============================================================================
 export const ROLES = {
-  SUPER_ADMIN:    'super_admin',
-  ADMIN_EMPRESA:  'admin_empresa',
-  JEFE_OBRA:      'jefe_obra',
-  ALMACENISTA:    'almacenista',
-  SOLICITANTE:    'solicitante',
-  SOLO_LECTURA:   'solo_lectura',
+  SUPER_ADMIN:   'super_admin',
+  ADMIN_EMPRESA: 'admin_empresa',
+  JEFE_OBRA:     'jefe_obra',
+  ALMACENISTA:   'almacenista',
+  SOLICITANTE:   'solicitante',
+  SOLO_LECTURA:  'solo_lectura',
 }
 
 export const ROLE_LABELS = {
@@ -22,7 +25,6 @@ export const ROLE_LABELS = {
   solo_lectura:  '👁️ Solo Lectura',
 }
 
-// Jerarquía de roles (mayor índice = más privilegios)
 export const ROLE_HIERARCHY = [
   'solo_lectura',
   'solicitante',
@@ -32,96 +34,156 @@ export const ROLE_HIERARCHY = [
   'super_admin',
 ]
 
+// Roles con acceso completo sin restricciones
+const ADMINS = ['super_admin', 'admin_empresa']
+const ALL    = ['super_admin', 'admin_empresa', 'jefe_obra', 'almacenista', 'solicitante', 'solo_lectura']
+const STAFF  = ['super_admin', 'admin_empresa', 'jefe_obra', 'almacenista', 'solicitante']
+const OPS    = ['super_admin', 'admin_empresa', 'jefe_obra']
+const MGMT   = ['super_admin', 'admin_empresa', 'jefe_obra', 'solo_lectura']
+
 // ============================================================================
-// PERMISOS POR MÓDULO Y ACCIÓN
-// Cada permiso lista los roles que PUEDEN ejecutar esa acción
+// PERMISOS POR MÓDULO
 // ============================================================================
 export const PERMISSIONS = {
 
-  // ── Dashboard ─────────────────────────────────────────────────────────────
-  dashboard: {
-    view: ['super_admin', 'admin_empresa', 'jefe_obra', 'almacenista', 'solicitante', 'solo_lectura'],
-  },
+  // ── General ───────────────────────────────────────────────
+  dashboard:    { view: ALL },
 
-  // ── Proyectos ─────────────────────────────────────────────────────────────
+  // ── Operación de Obra ─────────────────────────────────────
   projects: {
-    view:   ['super_admin', 'admin_empresa', 'jefe_obra', 'almacenista', 'solicitante', 'solo_lectura'],
-    create: ['super_admin', 'admin_empresa', 'jefe_obra'],
-    edit:   ['super_admin', 'admin_empresa', 'jefe_obra'],
-    delete: ['super_admin', 'admin_empresa'],
+    view:   ALL,
+    create: OPS,
+    edit:   OPS,
+    delete: ADMINS,
   },
-
-  // ── Árbol de Proyecto ─────────────────────────────────────────────────────
   project_tree: {
-    view:     ['super_admin', 'admin_empresa', 'jefe_obra', 'almacenista', 'solicitante', 'solo_lectura'],
-    create:   ['super_admin', 'admin_empresa', 'jefe_obra'],
-    edit:     ['super_admin', 'admin_empresa', 'jefe_obra'],
-    delete:   ['super_admin', 'admin_empresa'],
-    validate: ['super_admin', 'admin_empresa', 'jefe_obra'],
+    view:     ALL,
+    create:   OPS,
+    edit:     OPS,
+    delete:   ADMINS,
+    validate: OPS,
   },
-
-  // ── Inventario ────────────────────────────────────────────────────────────
-  inventory: {
-    view:   ['super_admin', 'admin_empresa', 'jefe_obra', 'almacenista', 'solo_lectura'],
-    create: ['super_admin', 'admin_empresa', 'almacenista'],
-    edit:   ['super_admin', 'admin_empresa', 'almacenista'],
-    delete: ['super_admin', 'admin_empresa'],
-  },
-
-  // ── Materiales (Catálogo) ─────────────────────────────────────────────────
-  materials: {
-    view:   ['super_admin', 'admin_empresa', 'jefe_obra', 'almacenista', 'solicitante', 'solo_lectura'],
-    create: ['super_admin', 'admin_empresa'],
-    edit:   ['super_admin', 'admin_empresa'],
-    delete: ['super_admin', 'admin_empresa'],
-  },
-
-  // ── Movimientos ───────────────────────────────────────────────────────────
-  movements: {
-    view:   ['super_admin', 'admin_empresa', 'jefe_obra', 'almacenista', 'solo_lectura'],
-    create: ['super_admin', 'admin_empresa', 'almacenista'],
-    edit:   ['super_admin', 'admin_empresa'],
-    delete: ['super_admin', 'admin_empresa'],
-    approve:['super_admin', 'admin_empresa', 'jefe_obra'],
-  },
-
-  // ── Reportes ──────────────────────────────────────────────────────────────
-  reports: {
-    view:   ['super_admin', 'admin_empresa', 'jefe_obra', 'solo_lectura'],
-    export: ['super_admin', 'admin_empresa', 'jefe_obra'],
-  },
-
-  // ── Asistencia ────────────────────────────────────────────────────────────
   attendance: {
-    view:   ['super_admin', 'admin_empresa', 'jefe_obra', 'almacenista', 'solo_lectura'],
-    create: ['super_admin', 'admin_empresa', 'jefe_obra', 'almacenista'],
-    edit:   ['super_admin', 'admin_empresa', 'jefe_obra'],
-    delete: ['super_admin', 'admin_empresa'],
+    view:   MGMT,
+    create: [...OPS, 'almacenista'],
+    edit:   OPS,
+    delete: ADMINS,
   },
 
-  // ── Administración de Usuarios (solo Super Admin + Admin Empresa) ─────────
-  users_admin: {
-    view:   ['super_admin', 'admin_empresa'],
-    create: ['super_admin', 'admin_empresa'],
-    edit:   ['super_admin', 'admin_empresa'],
-    delete: ['super_admin'],
-    assign_role: ['super_admin'],
+  // ── Personal ──────────────────────────────────────────────
+  personal: {
+    view:   ADMINS,
+    create: ADMINS,
+    edit:   ADMINS,
+    delete: ADMINS,
   },
 
-  // ── Gestión de Materiales (Solicitudes) ──────────────────────────────────────
+  // ── Materiales ────────────────────────────────────────────
+  inventory: {
+    view:   [...MGMT, 'almacenista'],
+    create: [...ADMINS, 'almacenista'],
+    edit:   [...ADMINS, 'almacenista'],
+    delete: ADMINS,
+  },
+  materials: {
+    view:   ALL,
+    create: ADMINS,
+    edit:   ADMINS,
+    delete: ADMINS,
+  },
+  movements: {
+    view:    [...MGMT, 'almacenista'],
+    create:  [...ADMINS, 'almacenista'],
+    edit:    ADMINS,
+    delete:  ADMINS,
+    approve: OPS,
+    receive: [...ADMINS, 'almacenista'],
+  },
   materials_requests: {
-    view:    ['super_admin', 'admin_empresa', 'jefe_obra', 'almacenista', 'solicitante', 'solo_lectura'],
-    create:  ['super_admin', 'admin_empresa', 'jefe_obra', 'solicitante'],
-    edit:    ['super_admin', 'admin_empresa', 'jefe_obra'],
-    delete:  ['super_admin', 'admin_empresa'],
-    approve: ['super_admin', 'admin_empresa', 'jefe_obra'],
-    receive: ['super_admin', 'admin_empresa', 'almacenista'],
+    view:    ALL,
+    create:  STAFF,
+    edit:    OPS,
+    delete:  ADMINS,
+    approve: OPS,
+    receive: [...ADMINS, 'almacenista'],
   },
 
-  // ── Configuración ─────────────────────────────────────────────────────────
+  // ── Compras ───────────────────────────────────────────────
+  compras: {
+    view:   [...MGMT, 'almacenista'],
+    create: ADMINS,
+    edit:   ADMINS,
+    delete: ADMINS,
+    approve:ADMINS,
+  },
+
+  // ── Gastos ────────────────────────────────────────────────
+  gastos: {
+    view:    ALL,
+    create:  STAFF,
+    edit:    OPS,
+    delete:  ADMINS,
+    approve: ADMINS,
+  },
+  gastos_admin: {
+    view:  ADMINS,
+    edit:  ADMINS,
+  },
+
+  // ── Comercial ─────────────────────────────────────────────
+  comercial: {
+    view:   [...MGMT, 'solicitante'],
+    create: ADMINS,
+    edit:   ADMINS,
+    delete: ADMINS,
+  },
+
+  // ── Facturación ───────────────────────────────────────────
+  facturacion: {
+    view:   ADMINS,
+    create: ADMINS,
+    edit:   ADMINS,
+    delete: ADMINS,
+    timbrar:ADMINS,
+  },
+
+  // ── Tesorería ─────────────────────────────────────────────
+  tesoreria: {
+    view:       ADMINS,
+    create:     ADMINS,
+    edit:       ADMINS,
+    delete:     ADMINS,
+    conciliar:  ADMINS,
+  },
+
+  // ── Finanzas / Contabilidad ───────────────────────────────
+  fiscal: {
+    view:   ADMINS,
+    create: ADMINS,
+    edit:   ADMINS,
+    delete: ADMINS,
+    sync:   ADMINS,
+  },
+
+  // ── Reportes ──────────────────────────────────────────────
+  reports: {
+    view:   MGMT,
+    export: OPS,
+  },
+
+  // ── Configuración ─────────────────────────────────────────
   settings: {
-    view:   ['super_admin', 'admin_empresa'],
-    edit:   ['super_admin', 'admin_empresa'],
+    view: ADMINS,
+    edit: ADMINS,
+  },
+
+  // ── Administración de Usuarios ────────────────────────────
+  users_admin: {
+    view:        ADMINS,
+    create:      ADMINS,
+    edit:        ADMINS,
+    delete:      ['super_admin'],
+    assign_role: ['super_admin'],
   },
 }
 
@@ -129,25 +191,120 @@ export const PERMISSIONS = {
 // MÓDULOS VISIBLES EN EL MENÚ POR ROL
 // ============================================================================
 export const MENU_ACCESS = {
-  super_admin:   ['dashboard','projects','project_tree','inventory','materials','movements','reports','attendance','users_admin','settings'],
-  admin_empresa: ['dashboard','projects','project_tree','inventory','materials','movements','reports','attendance','users_admin','settings'],
-  jefe_obra:     ['dashboard','projects','project_tree','inventory','materials','movements','reports','attendance'],
-  almacenista:   ['dashboard','projects','project_tree','inventory','movements','attendance'],
-  solicitante:   ['dashboard','projects','project_tree','materials'],
-  solo_lectura:  ['dashboard','projects','project_tree','reports'],
+
+  super_admin: [
+    // General
+    'dashboard',
+    // Obra
+    'projects', 'project_tree', 'attendance',
+    // Personal
+    'personal',
+    // Materiales
+    'inventory', 'materials', 'movements', 'materials_requests',
+    // Compras
+    'compras',
+    // Gastos
+    'gastos', 'gastos_admin',
+    // Comercial
+    'comercial',
+    // Facturación
+    'facturacion',
+    // Tesorería
+    'tesoreria',
+    // Finanzas
+    'fiscal',
+    // Reportes
+    'reports',
+    // Admin
+    'settings', 'users_admin',
+  ],
+
+  admin_empresa: [
+    'dashboard',
+    'projects', 'project_tree', 'attendance',
+    'personal',
+    'inventory', 'materials', 'movements', 'materials_requests',
+    'compras',
+    'gastos', 'gastos_admin',
+    'comercial',
+    'facturacion',
+    'tesoreria',
+    'fiscal',
+    'reports',
+    'settings', 'users_admin',
+  ],
+
+  jefe_obra: [
+    'dashboard',
+    'projects', 'project_tree', 'attendance',
+    'personal',
+    'inventory', 'materials', 'movements', 'materials_requests',
+    'compras',
+    'gastos',
+    'reports',
+  ],
+
+  almacenista: [
+    'dashboard',
+    'projects', 'project_tree',
+    'inventory', 'movements', 'materials_requests',
+    'attendance',
+  ],
+
+  solicitante: [
+    'dashboard',
+    'projects', 'project_tree',
+    'materials', 'materials_requests',
+    'gastos',
+    'comercial',
+  ],
+
+  solo_lectura: [
+    'dashboard',
+    'projects', 'project_tree',
+    'reports',
+  ],
 }
 
 // ============================================================================
-// HELPER: verificar si un rol tiene un permiso específico
+// HELPERS
 // ============================================================================
+
+/**
+ * Verifica si un rol tiene permiso para una acción en un módulo.
+ * El super_admin siempre tiene acceso a todo.
+ */
 export const hasPermission = (role, module, action) => {
   if (!role || !module || !action) return false
-  if (role === ROLES.SUPER_ADMIN) return true  // Super Admin siempre tiene acceso
+  if (role === ROLES.SUPER_ADMIN) return true
   return PERMISSIONS[module]?.[action]?.includes(role) ?? false
 }
 
+/**
+ * Verifica si un rol puede acceder a un módulo del menú.
+ * El super_admin siempre puede acceder a todo.
+ */
 export const canAccessModule = (role, module) => {
   if (!role || !module) return false
   if (role === ROLES.SUPER_ADMIN) return true
   return MENU_ACCESS[role]?.includes(module) ?? false
+}
+
+/**
+ * Retorna todos los módulos accesibles para un rol.
+ */
+export const getModulosAccesibles = (role) => {
+  if (!role) return []
+  if (role === ROLES.SUPER_ADMIN) return Object.keys(PERMISSIONS)
+  return MENU_ACCESS[role] ?? []
+}
+
+/**
+ * Verifica si un rol es igual o superior a otro en la jerarquía.
+ */
+export const rolTieneJerarquia = (rolActual, rolMinimo) => {
+  const idxActual  = ROLE_HIERARCHY.indexOf(rolActual)
+  const idxMinimo  = ROLE_HIERARCHY.indexOf(rolMinimo)
+  if (idxActual === -1) return false
+  return idxActual >= idxMinimo
 }
